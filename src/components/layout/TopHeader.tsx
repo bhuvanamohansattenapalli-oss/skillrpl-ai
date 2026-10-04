@@ -4,9 +4,14 @@ import {
   Bell,
   Search,
   Sun,
-  Moon
+  Moon,
+  LogIn,
+  LogOut,
+  UserCheck,
+  Award
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 
 interface TopHeaderProps {
   onToggleSidebar: () => void;
@@ -16,8 +21,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({ onToggleSidebar }) => {
   const {
     notifications,
     setIsNotificationsDrawerOpen,
-    showToast
+    showToast,
+    setCurrentView
   } = useApp();
+  const { role, profile, signOut } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -121,8 +128,112 @@ export const TopHeader: React.FC<TopHeaderProps> = ({ onToggleSidebar }) => {
         />
       </form>
 
-      {/* Right Controls: Theme Capsule + Notification Bell */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginLeft: 'auto' }}>
+      {/* Right Controls: User Profile, Theme Capsule + Notification Bell */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginLeft: 'auto' }}>
+        {/* User Role Badge & Auth Controls */}
+        {role ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '6px 14px',
+                borderRadius: '9999px',
+                background: role === 'ASSESSOR' ? 'rgba(234, 88, 12, 0.1)' : 'rgba(2, 132, 199, 0.1)',
+                border: role === 'ASSESSOR' ? '1px solid rgba(234, 88, 12, 0.25)' : '1px solid rgba(2, 132, 199, 0.25)',
+                color: role === 'ASSESSOR' ? '#c2410c' : '#0369a1'
+              }}
+            >
+              {role === 'ASSESSOR' ? <Award size={15} color="#ea580c" /> : <UserCheck size={15} color="#0284c7" />}
+              <span style={{ fontSize: '13px', fontWeight: 700 }}>
+                {profile?.name || (role === 'ASSESSOR' ? 'Assessor' : 'Worker')}
+              </span>
+              <span
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  textTransform: 'uppercase',
+                  padding: '2px 6px',
+                  borderRadius: '6px',
+                  background: role === 'ASSESSOR' ? '#ea580c' : '#0284c7',
+                  color: '#ffffff',
+                  letterSpacing: '0.04em'
+                }}
+              >
+                {role}
+              </span>
+            </div>
+
+            <button
+              onClick={async () => {
+                await signOut();
+                setCurrentView('login');
+                showToast('Signed out successfully.', 'info');
+              }}
+              title="Sign Out"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 12px',
+                borderRadius: '10px',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                background: 'rgba(254, 242, 242, 0.8)',
+                color: '#dc2626',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              <LogOut size={14} />
+              <span>Logout</span>
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              onClick={() => setCurrentView('login')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                borderRadius: '10px',
+                border: '1px solid rgba(2, 132, 199, 0.3)',
+                background: 'rgba(240, 249, 255, 0.9)',
+                color: '#0284c7',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              <LogIn size={14} />
+              <span>Sign In</span>
+            </button>
+            <button
+              onClick={() => setCurrentView('signup')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                borderRadius: '10px',
+                border: 'none',
+                background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                color: '#ffffff',
+                fontSize: '13px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(2, 132, 199, 0.3)'
+              }}
+            >
+              <span>Sign Up</span>
+            </button>
+          </div>
+        )}
+
         {/* Dark Theme Capsule Toggle */}
         <button
           onClick={toggleTheme}

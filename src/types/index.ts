@@ -1,5 +1,7 @@
 export type AppView = 
   | 'landing'
+  | 'login'
+  | 'signup'
   | 'dashboard'
   | 'profile'
   | 'experience'

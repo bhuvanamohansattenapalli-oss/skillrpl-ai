@@ -84,18 +84,19 @@ model WorkerProfile {
   dateOfBirth         String?
   gender              String?
   email               String
-  phone               String
+  phone               String?
   preferredContact    String?           @default("phone")
   aadhaarMasked       String?
   location            String?
   state               String?
-  trade               String
+  trade               String?           @default("General Technical")
   primaryTrade        String?
   tradeCode           String?
   nsqfLevel           Int               @default(1)
   yearsOfExperience   Float             @default(0)
   profileCompletion   Int               @default(0)
   professionalSummary String?
+  bio                 String?
   preferredLanguage   String            @default("English")
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
@@ -115,9 +116,9 @@ model AssessorProfile {
   user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   name                String
   email               String
-  phone               String
-  tradeSpecialization String
-  assessorRegNumber   String        @unique
+  phone               String?
+  tradeSpecialization String?       @default("General Assessment")
+  assessorRegNumber   String?       @unique
   organization        String?
   nsqfCertifiedLevel  Int           @default(5)
   isAvailable         Boolean       @default(true)

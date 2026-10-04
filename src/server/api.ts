@@ -396,6 +396,17 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
 
     try {
+      // Server-side Role Authorization Check: Workers cannot submit assessor scores
+      const clientRole = req.headers['x-user-role'];
+      if (clientRole === 'WORKER') {
+        sendJsonResponse(res, 403, {
+          success: false,
+          code: 'FORBIDDEN_ASSESSOR_ONLY',
+          error: 'Forbidden: Workers are not authorized to evaluate or submit assessment decisions.'
+        });
+        return true;
+      }
+
       const rawBody: any = await parseRequestBody(req);
       const { assessmentId, applicationId, scores, remarks, isFinal, practicalTaskDemo } = rawBody;
 
@@ -523,6 +534,188 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     } catch (err: any) {
       console.error('[Assessor Submit Assessment Error]', err);
       sendJsonResponse(res, 500, { success: false, error: err.message || 'Server error' });
+      return true;
+    }
+  }
+
+  // 7. Auth Sync Profile: POST /api/auth/sync-profile
+  if (pathname === '/api/auth/sync-profile') {
+    if (req.method !== 'POST') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use POST.' });
+      return true;
+    }
+
+    try {
+      const rawBody: any = await parseRequestBody(req);
+      const { email, role, name, phone, trade, organization, location, token } = rawBody;
+
+      if (!email || !role) {
+        sendJsonResponse(res, 400, { success: false, error: 'Email and role are required.' });
+        return true;
+      }
+
+      if (role !== 'WORKER' && role !== 'ASSESSOR') {
+        sendJsonResponse(res, 400, { success: false, error: 'Role must be WORKER or ASSESSOR.' });
+        return true;
+      }
+
+      let verifiedUserId: string | undefined;
+
+      // If token provided, verify with Supabase Auth
+      if (token) {
+        try {
+          const { verifySupabaseToken } = await import('./auth.ts');
+          const authUser = await verifySupabaseToken(token);
+          verifiedUserId = authUser.id;
+        } catch (tokenErr) {
+          console.warn('[Auth Token Verification Notice]', tokenErr);
+        }
+      }
+
+      const { syncUserProfile } = await import('./auth.ts');
+      const synced = await syncUserProfile({
+        userId: verifiedUserId,
+        email: email.trim().toLowerCase(),
+        role,
+        name: name?.trim() || (role === 'ASSESSOR' ? 'Accredited Assessor' : 'Candidate Worker'),
+        phone: phone?.trim(),
+        trade: trade?.trim(),
+        organization: organization?.trim(),
+        location: location?.trim()
+      });
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        data: synced
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Auth Sync Profile Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Profile synchronization failed.' });
+      return true;
+    }
+  }
+
+  // 8. Auth Get User Role: GET /api/auth/user-role
+  if (pathname === '/api/auth/user-role') {
+    if (req.method !== 'GET') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use GET.' });
+      return true;
+    }
+
+    try {
+      const email = parsedUrl.searchParams.get('email')?.trim().toLowerCase();
+      const authHeader = req.headers['authorization'];
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
+
+      const { prisma } = await import('../lib/db.ts');
+      let user = null;
+
+      if (token) {
+        try {
+          const { verifySupabaseToken } = await import('./auth.ts');
+          const authUser = await verifySupabaseToken(token);
+          if (authUser?.email) {
+            user = await prisma.user.findFirst({
+              where: { email: authUser.email.toLowerCase() },
+              include: { workerProfile: true, assessorProfile: true }
+            });
+          }
+        } catch {}
+      }
+
+      if (!user && email) {
+        user = await prisma.user.findFirst({
+          where: { email },
+          include: { workerProfile: true, assessorProfile: true }
+        });
+      }
+
+      if (!user) {
+        sendJsonResponse(res, 404, { success: false, error: 'User not found in system.' });
+        return true;
+      }
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        data: {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          profile: user.role === 'ASSESSOR' ? user.assessorProfile : user.workerProfile
+        }
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Get User Role Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Error fetching user role.' });
+      return true;
+    }
+  }
+
+  // 9. Assessor List Assessments: GET /api/assessor/assessments
+  if (pathname === '/api/assessor/assessments') {
+    if (req.method !== 'GET') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use GET.' });
+      return true;
+    }
+
+    try {
+      const clientRole = req.headers['x-user-role'];
+      const authHeader = req.headers['authorization'];
+      const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
+
+      if (clientRole === 'WORKER') {
+        sendJsonResponse(res, 403, {
+          success: false,
+          code: 'FORBIDDEN_ASSESSOR_ONLY',
+          error: 'Forbidden: Candidate workers are not authorized to view assessor queues.'
+        });
+        return true;
+      }
+
+      const { prisma } = await import('../lib/db.ts');
+
+      if (token) {
+        try {
+          const { verifySupabaseToken } = await import('./auth.ts');
+          const authUser = await verifySupabaseToken(token);
+          if (authUser?.email) {
+            const dbUser = await prisma.user.findFirst({
+              where: { email: authUser.email.toLowerCase() }
+            });
+            if (dbUser && dbUser.role === 'WORKER') {
+              sendJsonResponse(res, 403, {
+                success: false,
+                code: 'FORBIDDEN_ASSESSOR_ONLY',
+                error: 'Forbidden: Candidate workers are not authorized to view assessor queues.'
+              });
+              return true;
+            }
+          }
+        } catch {}
+      }
+
+      const assessments = await prisma.assessment.findMany({
+        include: {
+          rplApplication: {
+            include: {
+              workerProfile: true
+            }
+          },
+          scores: true
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        data: assessments
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Assessor Assessments Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to retrieve assessment queue.' });
       return true;
     }
   }

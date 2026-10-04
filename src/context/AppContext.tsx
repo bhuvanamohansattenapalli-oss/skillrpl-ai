@@ -101,6 +101,10 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 // Helper to deduce view from path
 const getViewFromPath = (path: string): { view: AppView; expId: string | null } => {
+  if (path === '/login') return { view: 'login', expId: null };
+  if (path === '/signup') return { view: 'signup', expId: null };
+  if (path === '/assessor/dashboard') return { view: 'assessor-dashboard', expId: null };
+  if (path === '/worker/dashboard' || path === '/dashboard') return { view: 'dashboard', expId: null };
   if (path === '/profile') return { view: 'profile', expId: null };
   if (path.startsWith('/experience/')) {
     const expId = path.replace('/experience/', '').trim();
@@ -152,7 +156,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setCurrentViewState(view);
     if (typeof window !== 'undefined') {
       let targetPath = '/';
-      if (view === 'profile') targetPath = '/profile';
+      if (view === 'login') targetPath = '/login';
+      else if (view === 'signup') targetPath = '/signup';
+      else if (view === 'dashboard') targetPath = '/worker/dashboard';
+      else if (view === 'assessor-dashboard') targetPath = '/assessor/dashboard';
+      else if (view === 'profile') targetPath = '/profile';
       else if (view === 'experience') targetPath = '/experience';
       else if (view === 'experience-detail') targetPath = selectedExperienceId ? `/experience/${selectedExperienceId}` : '/experience';
       else if (view === 'declaration') targetPath = '/declaration';

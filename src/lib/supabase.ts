@@ -8,12 +8,14 @@ let supabaseClientInstance: SupabaseClient | null = null;
 
 export function getSupabaseClient(): SupabaseClient | null {
   const supabaseUrl =
-    (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SUPABASE_URL) ||
-    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_URL);
+    (typeof import.meta !== 'undefined' && (import.meta as any).env?.NEXT_PUBLIC_SUPABASE_URL) ||
+    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_URL) ||
+    (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SUPABASE_URL);
 
   const supabaseAnonKey =
-    (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY) ||
-    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY);
+    (typeof import.meta !== 'undefined' && (import.meta as any).env?.NEXT_PUBLIC_SUPABASE_ANON_KEY) ||
+    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SUPABASE_ANON_KEY) ||
+    (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
   if (
     !supabaseUrl ||
@@ -36,7 +38,7 @@ export function getSupabaseClient(): SupabaseClient | null {
  * ONLY callable in Node.js server environments.
  */
 export function getServerSupabaseClient(): SupabaseClient | null {
-  if (typeof window !== 'undefined') {
+  if (typeof globalThis !== 'undefined' && 'window' in globalThis) {
     throw new Error('getServerSupabaseClient must NEVER be called in browser environments.');
   }
 

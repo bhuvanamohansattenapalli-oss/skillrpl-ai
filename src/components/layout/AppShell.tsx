@@ -25,13 +25,18 @@ import { AssessorDashboard } from '../views/AssessorDashboard';
 import { AssessorCandidateView } from '../views/AssessorCandidateView';
 import { ResultPage } from '../views/ResultPage';
 import { SettingsPage } from '../views/SettingsPage';
+import { LoginPage } from '../views/LoginPage';
+import { SignupPage } from '../views/SignupPage';
 import { EditProfileModal } from '../modals/EditProfileModal';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
+import { ShieldAlert, Lock } from 'lucide-react';
 import heroImg from '../../assets/taj_mahal_hero.jpg';
 
 export const AppShell: React.FC = () => {
   const {
     currentView,
+    setCurrentView,
     isWatchModalOpen,
     setIsWatchModalOpen,
     isJobModalOpen,
@@ -41,12 +46,119 @@ export const AppShell: React.FC = () => {
     isHelpModalOpen,
     setIsHelpModalOpen
   } = useApp();
+  const { role, loading } = useAuth();
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   const renderCurrentView = () => {
+    // If not authenticated and attempting to access protected page
+    if (!role && !loading && currentView !== 'landing' && currentView !== 'login' && currentView !== 'signup') {
+      return (
+        <div style={{ maxWidth: '520px', margin: '60px auto', textAlign: 'center' }}>
+          <div 
+            className="glass-card" 
+            style={{
+              padding: '36px 30px',
+              borderRadius: '24px',
+              background: 'rgba(255, 255, 255, 0.9)',
+              boxShadow: '0 20px 40px -15px rgba(15, 23, 42, 0.08)'
+            }}
+          >
+            <div style={{ width: '56px', height: '56px', borderRadius: '16px', background: '#fee2e2', color: '#dc2626', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
+              <Lock size={28} />
+            </div>
+            <h2 style={{ fontSize: '22px', fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>
+              Authentication Required
+            </h2>
+            <p style={{ fontSize: '14px', color: '#64748b', margin: '0 0 24px 0', lineHeight: 1.5 }}>
+              Please sign in with your Worker or Assessor account to access SkillRPL portal features and records.
+            </p>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <button
+                onClick={() => setCurrentView('login')}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: '12px',
+                  background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                  color: '#ffffff',
+                  fontWeight: 700,
+                  fontSize: '14px',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+              >
+                Go to Sign In
+              </button>
+              <button
+                onClick={() => setCurrentView('signup')}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: '12px',
+                  background: '#f1f5f9',
+                  color: '#334155',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  border: '1px solid #cbd5e1',
+                  cursor: 'pointer'
+                }}
+              >
+                Create Account
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Role-based protection: Worker attempting to access assessor views
+    if (role === 'WORKER' && (currentView === 'assessor-dashboard' || currentView === 'assessor-candidate')) {
+      return (
+        <div style={{ maxWidth: '580px', margin: '60px auto', textAlign: 'center' }}>
+          <div 
+            className="glass-card" 
+            style={{
+              padding: '36px 30px',
+              borderRadius: '24px',
+              background: 'rgba(255, 255, 255, 0.92)',
+              border: '1px solid #fed7aa',
+              boxShadow: '0 20px 40px -15px rgba(234, 88, 12, 0.1)'
+            }}
+          >
+            <div style={{ width: '56px', height: '56px', borderRadius: '16px', background: '#ffedd5', color: '#ea580c', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginBottom: '16px' }}>
+              <ShieldAlert size={28} />
+            </div>
+            <h2 style={{ fontSize: '22px', fontWeight: 800, color: '#0f172a', margin: '0 0 8px 0' }}>
+              Assessor Accreditation Required
+            </h2>
+            <p style={{ fontSize: '14px', color: '#64748b', margin: '0 0 24px 0', lineHeight: 1.5 }}>
+              You are signed in with a <strong>Candidate Worker</strong> profile. Candidate accounts cannot view assessor scoring panels, candidate portfolios, or finalize assessment decisions.
+            </p>
+            <button
+              onClick={() => setCurrentView('dashboard')}
+              style={{
+                padding: '12px 24px',
+                borderRadius: '12px',
+                background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                color: '#ffffff',
+                fontWeight: 700,
+                fontSize: '14px',
+                border: 'none',
+                cursor: 'pointer'
+              }}
+            >
+              Return to Worker Dashboard
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     switch (currentView) {
       case 'landing':
         return <LandingPage />;
+      case 'login':
+        return <LoginPage />;
+      case 'signup':
+        return <SignupPage />;
       case 'dashboard':
         return <WorkerDashboard />;
       case 'profile':

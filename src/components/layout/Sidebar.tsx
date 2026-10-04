@@ -9,13 +9,12 @@ import {
   BookOpen,
   BarChart3,
   HelpCircle,
-  ShieldCheck,
   Settings,
-  ChevronRight,
   Sparkles,
   Cpu
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 import { IndiaMapGraphic } from '../common/IndiaMapGraphic';
 import type { AppView } from '../../types';
 
@@ -28,12 +27,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
   const {
     currentView,
     setCurrentView,
-    userRole,
-    setUserRole,
     setIsJobModalOpen,
     setIsLearningModalOpen,
     setIsHelpModalOpen
   } = useApp();
+  const { role } = useAuth();
 
   const navigateTo = (view: AppView) => {
     setCurrentView(view);
@@ -184,35 +182,48 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
 
       {/* Navigation List - Matching Photo Options */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, marginTop: '4px' }}>
-        {/* 1. Dashboard (Active royal blue glossy pill) */}
+        {/* 1. Dashboard */}
         <button
-          onClick={() => navigateTo('dashboard')}
-          style={navItemStyle(isItemActive('dashboard'))}
+          onClick={() => navigateTo(role === 'ASSESSOR' ? 'assessor-dashboard' : 'dashboard')}
+          style={navItemStyle(role === 'ASSESSOR' ? currentView === 'assessor-dashboard' : isItemActive('dashboard'))}
           className="sidebar-btn"
         >
-          <Home size={18} color={isItemActive('dashboard') ? '#FFFFFF' : '#9cb3cf'} />
-          <span>Dashboard</span>
+          <Home size={18} color={(role === 'ASSESSOR' ? currentView === 'assessor-dashboard' : isItemActive('dashboard')) ? '#FFFFFF' : '#9cb3cf'} />
+          <span>{role === 'ASSESSOR' ? 'Assessor Dashboard' : 'Dashboard'}</span>
         </button>
 
-        {/* 2. My Profile */}
-        <button
-          onClick={() => navigateTo('profile')}
-          style={navItemStyle(isItemActive('profile'))}
-          className="sidebar-btn"
-        >
-          <User size={18} color={isItemActive('profile') ? '#FFFFFF' : '#9cb3cf'} />
-          <span>My Profile</span>
-        </button>
+        {/* 1.1 Candidate Reviews for Assessors or My Profile for Workers */}
+        {role === 'ASSESSOR' ? (
+          <button
+            onClick={() => navigateTo('assessor-candidate')}
+            style={navItemStyle(currentView === 'assessor-candidate')}
+            className="sidebar-btn"
+          >
+            <Award size={18} color={currentView === 'assessor-candidate' ? '#FFFFFF' : '#fb923c'} />
+            <span>Candidate Review</span>
+          </button>
+        ) : (
+          <button
+            onClick={() => navigateTo('profile')}
+            style={navItemStyle(isItemActive('profile'))}
+            className="sidebar-btn"
+          >
+            <User size={18} color={isItemActive('profile') ? '#FFFFFF' : '#9cb3cf'} />
+            <span>My Profile</span>
+          </button>
+        )}
 
-        {/* 2.1 My Experience */}
-        <button
-          onClick={() => navigateTo('experience')}
-          style={navItemStyle(isItemActive('experience'))}
-          className="sidebar-btn"
-        >
-          <Briefcase size={18} color={isItemActive('experience') ? '#FFFFFF' : '#9cb3cf'} />
-          <span>My Experience</span>
-        </button>
+        {/* 2.1 My Experience (Workers) */}
+        {role !== 'ASSESSOR' && (
+          <button
+            onClick={() => navigateTo('experience')}
+            style={navItemStyle(isItemActive('experience'))}
+            className="sidebar-btn"
+          >
+            <Briefcase size={18} color={isItemActive('experience') ? '#FFFFFF' : '#9cb3cf'} />
+            <span>My Experience</span>
+          </button>
+        )}
 
         {/* 2.2 RPL AI Assistant */}
         <button
@@ -334,36 +345,48 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
           <span>Help & Support</span>
         </button>
 
-        {/* Present Options: Assessor Portal & Settings Switch (Preserved Cleanly) */}
+        {/* Role & Account Information */}
         <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
-          <button
-            onClick={() => {
-              const nextRole = userRole === 'worker' ? 'assessor' : 'worker';
-              setUserRole(nextRole);
-              navigateTo(nextRole === 'worker' ? 'dashboard' : 'assessor-dashboard');
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '7px 12px',
-              borderRadius: '10px',
-              fontSize: '12px',
-              fontWeight: 600,
-              color: '#38bdf8',
-              background: 'rgba(56, 189, 248, 0.1)',
-              border: '1px solid rgba(56, 189, 248, 0.25)',
-              width: '100%',
-              cursor: 'pointer',
-              marginBottom: '4px'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <ShieldCheck size={15} />
-              <span>{userRole === 'worker' ? 'Assessor View' : 'Worker View'}</span>
+          {role ? (
+            <div
+              style={{
+                padding: '8px 12px',
+                borderRadius: '10px',
+                background: role === 'ASSESSOR' ? 'rgba(234, 88, 12, 0.12)' : 'rgba(56, 189, 248, 0.1)',
+                border: role === 'ASSESSOR' ? '1px solid rgba(234, 88, 12, 0.25)' : '1px solid rgba(56, 189, 248, 0.25)',
+                marginBottom: '6px'
+              }}
+            >
+              <div style={{ fontSize: '10.5px', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em' }}>
+                Active Identity
+              </div>
+              <div style={{ fontSize: '12.5px', fontWeight: 700, color: role === 'ASSESSOR' ? '#fb923c' : '#38bdf8', marginTop: '2px' }}>
+                {role === 'ASSESSOR' ? 'Assessor Accreditation' : 'Worker Profile'}
+              </div>
             </div>
-            <ChevronRight size={13} />
-          </button>
+          ) : (
+            <button
+              onClick={() => navigateTo('login')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                padding: '8px 12px',
+                borderRadius: '10px',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: '#38bdf8',
+                background: 'rgba(56, 189, 248, 0.1)',
+                border: '1px solid rgba(56, 189, 248, 0.25)',
+                width: '100%',
+                cursor: 'pointer',
+                marginBottom: '6px'
+              }}
+            >
+              <span>Sign In to SkillRPL</span>
+            </button>
+          )}
 
           <button
             onClick={() => navigateTo('settings')}

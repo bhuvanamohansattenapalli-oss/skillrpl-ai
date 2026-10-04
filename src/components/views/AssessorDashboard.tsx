@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Users,
   Clock,
@@ -8,13 +8,15 @@ import {
   ShieldCheck,
   FileCheck,
   Award,
-  ChevronRight
+  ChevronRight,
+  Inbox
 } from 'lucide-react';
 import { GlassCard } from '../common/GlassCard';
 import { GlassButton } from '../common/GlassButton';
 import { GlassBadge } from '../common/GlassBadge';
 import { GlassStatCard } from '../common/GlassStatCard';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 
 export const AssessorDashboard: React.FC = () => {
   const {
@@ -23,11 +25,57 @@ export const AssessorDashboard: React.FC = () => {
     setCurrentView,
     showToast
   } = useApp();
+  const { role, session } = useAuth();
 
+  const [activeSection, setActiveSection] = useState<'assigned' | 'pending' | 'evidence' | 'scoring' | 'completed'>('assigned');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [dbAssessments, setDbAssessments] = useState<any[]>([]);
 
-  const filteredCandidates = candidatesForAssessor.filter((c) => {
+  useEffect(() => {
+    let isMounted = true;
+    const fetchAssessments = async () => {
+      try {
+        const headers: Record<string, string> = {
+          'x-user-role': role || 'ASSESSOR'
+        };
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
+        const res = await fetch('/api/assessor/assessments', { headers });
+        if (res.ok) {
+          const json = await res.json();
+          if (isMounted && Array.isArray(json.data) && json.data.length > 0) {
+            setDbAssessments(json.data);
+          }
+        }
+      } catch (err) {
+        // Fallback gracefully to demo candidate list
+      }
+    };
+
+    fetchAssessments();
+    return () => {
+      isMounted = false;
+    };
+  }, [role, session]);
+
+  const candidateList = dbAssessments.length > 0
+    ? dbAssessments.map((a: any, idx: number) => ({
+        id: a.id || `db-${idx}`,
+        applicationId: a.rplApplication?.applicationNumber || `RPL-2026-00${idx + 1}`,
+        name: a.rplApplication?.workerProfile?.name || 'Registered Candidate',
+        avatarInitials: (a.rplApplication?.workerProfile?.name || 'RC').split(' ').map((n: string) => n[0]).join('').slice(0, 2),
+        trade: a.rplApplication?.workerProfile?.trade || 'Technical Trade',
+        nsqfLevel: a.rplApplication?.workerProfile?.nsqfLevel || 4,
+        experience: `${a.rplApplication?.workerProfile?.yearsOfExperience || 4} Years`,
+        location: a.rplApplication?.workerProfile?.location || 'India',
+        evidenceCount: a.scores?.length || 3,
+        assessmentStatus: a.status === 'COMPLETED' ? 'Completed' : a.status === 'IN_PROGRESS' ? 'In Progress' : 'Pending Review'
+      }))
+    : candidatesForAssessor;
+
+  const filteredCandidates = candidateList.filter((c) => {
     const matchesSearch =
       c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.trade.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -160,6 +208,52 @@ export const AssessorDashboard: React.FC = () => {
           gap: '20px'
         }}
       >
+        {/* Section Tabs matching Phase 2.1 requirements */}
+        <div 
+          style={{ 
+            display: 'flex', 
+            gap: '8px', 
+            borderBottom: '1px solid rgba(18, 59, 93, 0.08)',
+            paddingBottom: '14px',
+            overflowX: 'auto'
+          }}
+        >
+          {[
+            { id: 'assigned', label: 'Assigned Assessments', filter: 'All' },
+            { id: 'pending', label: 'Pending Review', filter: 'Pending Review' },
+            { id: 'evidence', label: 'Evidence Review', filter: 'In Progress' },
+            { id: 'scoring', label: 'Assessment Scoring', filter: 'Needs Review' },
+            { id: 'completed', label: 'Completed Assessments', filter: 'Completed' }
+          ].map((sec) => (
+            <button
+              key={sec.id}
+              onClick={() => {
+                setActiveSection(sec.id as any);
+                setStatusFilter(sec.filter);
+              }}
+              style={{
+                padding: '8px 16px',
+                borderRadius: '10px',
+                fontSize: '13px',
+                fontWeight: activeSection === sec.id ? 700 : 500,
+                color: activeSection === sec.id ? '#ffffff' : '#64748b',
+                background: activeSection === sec.id 
+                  ? 'linear-gradient(135deg, #123B5D 0%, #1a4f7c 100%)' 
+                  : 'rgba(255, 255, 255, 0.6)',
+                border: activeSection === sec.id 
+                  ? '1px solid rgba(18, 59, 93, 0.9)' 
+                  : '1px solid rgba(18, 59, 93, 0.08)',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.16s ease',
+                boxShadow: activeSection === sec.id ? '0 4px 12px rgba(18, 59, 93, 0.2)' : 'none'
+              }}
+            >
+              {sec.label}
+            </button>
+          ))}
+        </div>
+
         {/* Table Controls: Search & Filter */}
         <div
           style={{
@@ -212,45 +306,80 @@ export const AssessorDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Clean Table with Glass Headers */}
-        <div style={{ overflowX: 'auto', width: '100%' }}>
-          <table
+        {/* Clean Table with Glass Headers & Professional Empty State */}
+        {filteredCandidates.length === 0 ? (
+          <div
             style={{
-              width: '100%',
-              borderCollapse: 'separate',
-              borderSpacing: '0 8px',
-              fontSize: '13.5px',
-              textAlign: 'left',
-              minWidth: '780px'
+              padding: '48px 24px',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#64748b'
             }}
           >
-            <thead>
-              <tr
-                style={{
-                  background: 'rgba(18, 59, 93, 0.04)',
-                  borderRadius: '10px'
-                }}
-              >
-                <th style={{ padding: '12px 16px', color: 'var(--color-primary-navy)', fontWeight: 700, borderRadius: '10px 0 0 10px' }}>
-                  Candidate
-                </th>
-                <th style={{ padding: '12px 16px', color: 'var(--color-primary-navy)', fontWeight: 700 }}>
-                  Trade & Level
-                </th>
-                <th style={{ padding: '12px 16px', color: 'var(--color-primary-navy)', fontWeight: 700 }}>
-                  Experience
-                </th>
-                <th style={{ padding: '12px 16px', color: 'var(--color-primary-navy)', fontWeight: 700 }}>
-                  Evidence Count
-                </th>
-                <th style={{ padding: '12px 16px', color: 'var(--color-primary-navy)', fontWeight: 700 }}>
-                  Status
-                </th>
-                <th style={{ padding: '12px 16px', color: 'var(--color-primary-navy)', fontWeight: 700, textAlign: 'right', borderRadius: '0 10px 10px 0' }}>
-                  Action
-                </th>
-              </tr>
-            </thead>
+            <div
+              style={{
+                width: '64px',
+                height: '64px',
+                borderRadius: '20px',
+                background: 'rgba(2, 132, 199, 0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#0284c7',
+                marginBottom: '16px'
+              }}
+            >
+              <Inbox size={32} />
+            </div>
+            <h4 style={{ fontSize: '17px', fontWeight: 700, color: '#0f172a', margin: '0 0 6px 0' }}>
+              No Assessments in Current Queue
+            </h4>
+            <p style={{ fontSize: '13.5px', color: '#64748b', maxWidth: '420px', margin: 0, lineHeight: 1.5 }}>
+              There are currently no assessments matching the selected filters. New portfolios assigned to your sector will appear here automatically.
+            </p>
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto', width: '100%' }}>
+            <table
+              style={{
+                width: '100%',
+                borderCollapse: 'separate',
+                borderSpacing: '0 8px',
+                fontSize: '13.5px',
+                textAlign: 'left',
+                minWidth: '780px'
+              }}
+            >
+              <thead>
+                <tr
+                  style={{
+                    background: 'rgba(18, 59, 93, 0.04)',
+                    borderRadius: '10px'
+                  }}
+                >
+                  <th style={{ padding: '12px 16px', color: 'var(--color-primary-navy)', fontWeight: 700, borderRadius: '10px 0 0 10px' }}>
+                    Candidate
+                  </th>
+                  <th style={{ padding: '12px 16px', color: 'var(--color-primary-navy)', fontWeight: 700 }}>
+                    Trade & Level
+                  </th>
+                  <th style={{ padding: '12px 16px', color: 'var(--color-primary-navy)', fontWeight: 700 }}>
+                    Experience
+                  </th>
+                  <th style={{ padding: '12px 16px', color: 'var(--color-primary-navy)', fontWeight: 700 }}>
+                    Evidence Count
+                  </th>
+                  <th style={{ padding: '12px 16px', color: 'var(--color-primary-navy)', fontWeight: 700 }}>
+                    Status
+                  </th>
+                  <th style={{ padding: '12px 16px', color: 'var(--color-primary-navy)', fontWeight: 700, textAlign: 'right', borderRadius: '0 10px 10px 0' }}>
+                    Action
+                  </th>
+                </tr>
+              </thead>
 
             <tbody>
               {filteredCandidates.map((candidate) => (
@@ -348,6 +477,7 @@ export const AssessorDashboard: React.FC = () => {
             </tbody>
           </table>
         </div>
+        )}
       </GlassCard>
     </div>
   );
