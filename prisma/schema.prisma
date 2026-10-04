@@ -1,0 +1,454 @@
+// Prisma schema for SkillRPL AI
+// Connected to Supabase PostgreSQL Database
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum UserRole {
+  WORKER
+  ASSESSOR
+  ADMIN
+}
+
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_ASSESSOR_REVIEW
+  ASSESSMENT_SCHEDULED
+  COMPETENT_CERTIFIED
+  NOT_YET_COMPETENT
+  REJECTED
+}
+
+enum EvidenceType {
+  PHOTO
+  VIDEO
+  DOCUMENT
+  CERTIFICATE
+  OTHER
+}
+
+enum AssessmentStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum CompetencyOutcome {
+  COMPETENT
+  NOT_YET_COMPETENT
+}
+
+enum MessageRole {
+  USER
+  MODEL
+  ASSISTANT
+  SYSTEM
+}
+
+// ==========================================
+// USER & PROFILES
+// ==========================================
+
+model User {
+  id              String           @id @default(uuid())
+  email           String           @unique
+  role            UserRole         @default(WORKER)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  workerProfile   WorkerProfile?
+  assessorProfile AssessorProfile?
+  auditLogs       AuditLog[]
+
+  @@map("users")
+}
+
+model WorkerProfile {
+  id                  String            @id @default(uuid())
+  userId              String            @unique
+  user                User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  avatarUrl           String?
+  dateOfBirth         String?
+  gender              String?
+  email               String
+  phone               String
+  preferredContact    String?           @default("phone")
+  aadhaarMasked       String?
+  location            String?
+  state               String?
+  trade               String
+  primaryTrade        String?
+  tradeCode           String?
+  nsqfLevel           Int               @default(1)
+  yearsOfExperience   Float             @default(0)
+  profileCompletion   Int               @default(0)
+  professionalSummary String?
+  preferredLanguage   String            @default("English")
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  workExperiences     WorkExperience[]
+  selfDeclaration     SelfDeclaration?
+  evidences           Evidence[]
+  rplApplications     RPLApplication[]
+  aiConversations     AIConversation[]
+
+  @@map("worker_profiles")
+}
+
+model AssessorProfile {
+  id                  String        @id @default(uuid())
+  userId              String        @unique
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name                String
+  email               String
+  phone               String
+  tradeSpecialization String
+  assessorRegNumber   String        @unique
+  organization        String?
+  nsqfCertifiedLevel  Int           @default(5)
+  isAvailable         Boolean       @default(true)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  assessments         Assessment[]
+
+  @@map("assessor_profiles")
+}
+
+// ==========================================
+// TRADES, QUALIFICATIONS & SKILLS
+// ==========================================
+
+model Trade {
+  id                 String              @id @default(uuid())
+  code               String              @unique
+  name               String
+  sector             String
+  nsqfLevel          Int
+  description        String?
+  isDemo             Boolean             @default(false)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  qualificationPacks QualificationPack[]
+  skills             Skill[]
+
+  @@map("trades")
+}
+
+model QualificationPack {
+  id                  String                @id @default(uuid())
+  code                String                @unique
+  qpCode              String
+  title               String
+  sector              String
+  nsqfLevel           Int
+  description         String?
+  isDemo              Boolean               @default(false)
+  tradeId             String
+  trade               Trade                 @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  qualificationSkills QualificationSkill[]
+  rplApplications     RPLApplication[]
+  assessmentCriteria  AssessmentCriterion[]
+
+  @@map("qualification_packs")
+}
+
+model Skill {
+  id                  String               @id @default(uuid())
+  name                String
+  category            String?
+  nsqfLevel           Int                  @default(1)
+  isDemo              Boolean              @default(false)
+  tradeId             String?
+  trade               Trade?               @relation(fields: [tradeId], references: [id], onDelete: SetNull)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  qualificationSkills QualificationSkill[]
+  evidenceSkills      EvidenceSkill[]
+
+  @@map("skills")
+}
+
+model QualificationSkill {
+  id                  String            @id @default(uuid())
+  qualificationPackId String
+  qualificationPack   QualificationPack @relation(fields: [qualificationPackId], references: [id], onDelete: Cascade)
+  skillId             String
+  skill               Skill             @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  isMandatory         Boolean           @default(true)
+
+  @@unique([qualificationPackId, skillId])
+  @@map("qualification_skills")
+}
+
+// ==========================================
+// WORK EXPERIENCE & SELF DECLARATION
+// ==========================================
+
+model WorkExperience {
+  id                String        @id @default(uuid())
+  workerProfileId   String
+  workerProfile     WorkerProfile @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  occupation        String
+  organization      String
+  location          String
+  startDate         String
+  endDate           String?
+  isCurrent         Boolean       @default(false)
+  yearsOfExperience Float
+  description       String?
+  responsibilities  String[]      @default([])
+  toolsUsed         String[]      @default([])
+  workType          String?
+  workEnvironment   String?
+  isDemo            Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@map("work_experiences")
+}
+
+model SelfDeclaration {
+  id                 String         @id @default(uuid())
+  workerProfileId    String         @unique
+  workerProfile      WorkerProfile  @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  regularWorkType    String
+  commonTasks        String[]       @default([])
+  toolsMachinery     String[]       @default([])
+  selfReportedScore  Float?
+  declaredAt         DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  tasks              DeclaredTask[]
+  tools              DeclaredTool[]
+
+  @@map("self_declarations")
+}
+
+model DeclaredTask {
+  id                String          @id @default(uuid())
+  selfDeclarationId String
+  selfDeclaration   SelfDeclaration @relation(fields: [selfDeclarationId], references: [id], onDelete: Cascade)
+  taskName          String
+  proficiencyLevel  String
+  yearsPerformed    Float?
+
+  @@map("declared_tasks")
+}
+
+model DeclaredTool {
+  id                String          @id @default(uuid())
+  selfDeclarationId String
+  selfDeclaration   SelfDeclaration @relation(fields: [selfDeclarationId], references: [id], onDelete: Cascade)
+  toolName          String
+  frequency         String?
+  isOwner           Boolean         @default(false)
+
+  @@map("declared_tools")
+}
+
+// ==========================================
+// EVIDENCE PORTFOLIO
+// ==========================================
+
+model Evidence {
+  id                   String          @id @default(uuid())
+  workerProfileId      String
+  workerProfile        WorkerProfile   @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  title                String
+  type                 EvidenceType    @default(PHOTO)
+  fileUrl              String
+  fileSize             Int?
+  mimeType             String?
+  description          String?
+  isVerifiedByAssessor Boolean         @default(false)
+  isDemo               Boolean         @default(false)
+  uploadedAt           DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  evidenceSkills       EvidenceSkill[]
+
+  @@map("evidences")
+}
+
+model EvidenceSkill {
+  id         String   @id @default(uuid())
+  evidenceId String
+  evidence   Evidence @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  skillId    String
+  skill      Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([evidenceId, skillId])
+  @@map("evidence_skills")
+}
+
+// ==========================================
+// RPL APPLICATION & LIFECYCLE
+// ==========================================
+
+model RPLApplication {
+  id                  String             @id @default(uuid())
+  applicationNumber   String             @unique
+  workerProfileId     String
+  workerProfile       WorkerProfile      @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  qualificationPackId String?
+  qualificationPack   QualificationPack? @relation(fields: [qualificationPackId], references: [id], onDelete: SetNull)
+  status              ApplicationStatus  @default(DRAFT)
+  submittedAt         DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  assessments         Assessment[]
+  aiAnalyses          AIAnalysis[]
+  competencyResults   CompetencyResult[]
+
+  @@map("rpl_applications")
+}
+
+// ==========================================
+// AI ASSISTANT & PREPARATORY ANALYSIS
+// ==========================================
+
+model AIConversation {
+  id              String         @id @default(uuid())
+  workerProfileId String?
+  workerProfile   WorkerProfile? @relation(fields: [workerProfileId], references: [id], onDelete: SetNull)
+  title           String         @default("RPL Assistance")
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  messages        AIMessage[]
+
+  @@map("ai_conversations")
+}
+
+model AIMessage {
+  id             String         @id @default(uuid())
+  conversationId String
+  conversation   AIConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           MessageRole
+  content        String
+  timestamp      DateTime       @default(now())
+
+  @@map("ai_messages")
+}
+
+model AIAnalysis {
+  id                   String         @id @default(uuid())
+  rplApplicationId     String
+  rplApplication       RPLApplication @relation(fields: [rplApplicationId], references: [id], onDelete: Cascade)
+  analysisType         String
+  summary              String
+  strengths            String[]       @default([])
+  recommendations      String[]       @default([])
+  potentialNsqfLevel   Int?
+  confidenceScore      Float?
+  isOfficialAssessment Boolean        @default(false)
+  createdAt            DateTime       @default(now())
+
+  @@map("ai_analyses")
+}
+
+// ==========================================
+// ASSESSOR EVALUATION & COMPETENCY RESULTS
+// ==========================================
+
+model Assessment {
+  id                String            @id @default(uuid())
+  rplApplicationId  String
+  rplApplication    RPLApplication    @relation(fields: [rplApplicationId], references: [id], onDelete: Cascade)
+  assessorProfileId String
+  assessorProfile   AssessorProfile   @relation(fields: [assessorProfileId], references: [id], onDelete: Cascade)
+  scheduledDate     DateTime?
+  status            AssessmentStatus  @default(SCHEDULED)
+  notes             String?
+  practicalTaskDemo String?
+  conductedAt       DateTime?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  scores            AssessmentScore[]
+  competencyResults CompetencyResult[]
+
+  @@map("assessments")
+}
+
+model AssessmentCriterion {
+  id                  String            @id @default(uuid())
+  qualificationPackId String
+  qualificationPack   QualificationPack @relation(fields: [qualificationPackId], references: [id], onDelete: Cascade)
+  code                String
+  description         String
+  maxScore            Float             @default(100.0)
+  weightage           Float             @default(1.0)
+
+  scores              AssessmentScore[]
+
+  @@map("assessment_criteria")
+}
+
+model AssessmentScore {
+  id           String              @id @default(uuid())
+  assessmentId String
+  assessment   Assessment          @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  criterionId  String
+  criterion    AssessmentCriterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
+  scoreAwarded Float
+  remarks      String?
+
+  @@map("assessment_scores")
+}
+
+model CompetencyResult {
+  id               String            @id @default(uuid())
+  assessmentId     String?
+  assessment       Assessment?       @relation(fields: [assessmentId], references: [id], onDelete: SetNull)
+  rplApplicationId String
+  rplApplication   RPLApplication    @relation(fields: [rplApplicationId], references: [id], onDelete: Cascade)
+  overallResult    CompetencyOutcome
+  finalNsqfLevel   Int
+  certifiedDate    DateTime?
+  certificateNumber String?          @unique
+  assessorRemarks  String?
+  createdAt        DateTime          @default(now())
+
+  @@map("competency_results")
+}
+
+// ==========================================
+// AUDIT LOG
+// ==========================================
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  entityId  String?
+  details   String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@map("audit_logs")
+}
