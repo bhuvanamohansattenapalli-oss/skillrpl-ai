@@ -151,9 +151,14 @@ export const AiAssistantPage: React.FC = () => {
         })
       });
 
-      const data = await response.json();
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch {
+        // In case of non-JSON response from server
+      }
 
-      if (data && data.success && data.message) {
+      if (response.ok && data && data.success && data.message) {
         // 4. Add AI Response from real Gemini backend
         const aiMsg: ChatMessage = {
           id: `msg-${Date.now() + 1}`,
@@ -163,23 +168,37 @@ export const AiAssistantPage: React.FC = () => {
         };
         setMessages((prev) => [...prev, aiMsg]);
       } else {
-        // Safe, friendly error message without exposing backend details
-        const errorText =
-          data?.error || 'AI Assistant is temporarily unavailable. Please try again.';
+        const statusCode = data?.status || response.status;
+        let errorMessage = data?.error;
+
+        if (statusCode === 429) {
+          errorMessage = 'AI request limit reached. Please wait a moment and try again.';
+        } else if (statusCode === 401 || statusCode === 403) {
+          errorMessage = 'AI service authentication failed. Please check the server configuration.';
+        } else if (statusCode === 404) {
+          errorMessage = 'Configured AI model is currently unavailable.';
+        } else if (!errorMessage) {
+          errorMessage = 'AI Assistant is temporarily unavailable. Please try again.';
+        }
+
         const aiMsg: ChatMessage = {
           id: `msg-${Date.now() + 1}`,
           sender: 'ai',
-          text: errorText,
+          text: errorMessage,
           timestamp: getTimestamp()
         };
         setMessages((prev) => [...prev, aiMsg]);
       }
     } catch (error) {
       console.error('Chat request failed:', error);
+      const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+      const networkMsg = isOffline
+        ? 'Network connection error. Please check your internet connection and try again.'
+        : 'AI Assistant is temporarily unavailable. Please try again.';
       const aiMsg: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         sender: 'ai',
-        text: 'AI Assistant is temporarily unavailable. Please check your connection and try again.',
+        text: networkMsg,
         timestamp: getTimestamp()
       };
       setMessages((prev) => [...prev, aiMsg]);

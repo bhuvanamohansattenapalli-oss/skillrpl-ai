@@ -22,8 +22,9 @@ export function isGeminiConfigured(): boolean {
  * Defaults to 'gemini-3.8-flash' if not explicitly configured.
  */
 export function getGeminiModel(): string {
-  return process.env.GEMINI_MODEL?.trim() || 'gemini-3.8-flash';
+  return process.env.GEMINI_MODEL?.trim() || 'gemini-3.6-flash';
 }
+
 
 /**
  * Returns a singleton instance of the GoogleGenAI client.

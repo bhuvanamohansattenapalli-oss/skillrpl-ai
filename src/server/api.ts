@@ -48,6 +48,23 @@ function parseRequestBody(req: IncomingMessage, maxBytes = 100_000): Promise<unk
   });
 }
 
+// In-memory sliding window rate limiter: 15 requests per 60 seconds
+const requestTimestamps: number[] = [];
+const RATE_LIMIT_MAX_RPM = 15;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+function checkRateLimit(): boolean {
+  const now = Date.now();
+  while (requestTimestamps.length > 0 && requestTimestamps[0] <= now - RATE_LIMIT_WINDOW_MS) {
+    requestTimestamps.shift();
+  }
+  if (requestTimestamps.length >= RATE_LIMIT_MAX_RPM) {
+    return false;
+  }
+  requestTimestamps.push(now);
+  return true;
+}
+
 /**
  * Main API middleware handler for /api/* routes.
  * Returns true if the route was handled, false if next() should be called.
@@ -91,7 +108,76 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     return true;
   }
 
-  // 2. Chat endpoint: POST /api/ai/chat
+  // 2. Safe Test Endpoint: GET /api/ai/test
+  if (pathname === '/api/ai/test') {
+    if (req.method !== 'GET') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use GET.' });
+      return true;
+    }
+
+    const model = getGeminiModel();
+    const isConfigured = isGeminiConfigured();
+
+    if (!isConfigured) {
+      console.error(`[Gemini Test] Status: 503 | Code: KEY_MISSING | Model: ${model} | KeyConfigured: false | Message: GEMINI_API_KEY is not configured.`);
+      sendJsonResponse(res, 503, {
+        success: false,
+        status: 503,
+        code: 'KEY_MISSING',
+        model,
+        error: 'GEMINI_API_KEY is not configured in environment.'
+      });
+      return true;
+    }
+
+    try {
+      const { getGeminiClient } = await import('../lib/ai/gemini.ts');
+      const ai = getGeminiClient();
+
+      const response = await ai.models.generateContent({
+        model,
+        contents: 'Respond with exactly: Gemini connection successful.'
+      });
+
+      const replyText = response.text?.trim() || 'Gemini connection successful.';
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        model,
+        message: replyText
+      });
+      return true;
+    } catch (err: any) {
+      const status = err?.status || err?.statusCode || 500;
+      const code = err?.code || (status === 429 ? 'RESOURCE_EXHAUSTED' : status === 404 ? 'NOT_FOUND' : status === 401 ? 'UNAUTHENTICATED' : 'ERROR');
+      const rawMsg = err?.message || String(err);
+
+      // Safe error extraction avoiding token or env leaks
+      let safeMsg = 'Unknown Gemini API error';
+      try {
+        const parsed = JSON.parse(rawMsg.slice(rawMsg.indexOf('{')));
+        safeMsg = parsed?.error?.message || rawMsg;
+      } catch {
+        safeMsg = rawMsg.replace(/key=[^&\s]+/gi, 'key=[REDACTED]');
+      }
+
+      // Safe server-side diagnostic logging (NEVER logs actual key, secrets, or full env)
+      console.error(
+        `[Gemini Diagnostic] Status: ${status} | Code: ${code} | Model: ${model} | KeyConfigured: ${isConfigured} | Error: ${safeMsg.slice(0, 300)}`
+      );
+
+      sendJsonResponse(res, status >= 400 && status < 600 ? status : 500, {
+        success: false,
+        status,
+        code,
+        model,
+        error: safeMsg
+      });
+      return true;
+    }
+  }
+
+  // 3. Chat endpoint: POST /api/ai/chat
   if (pathname === '/api/ai/chat') {
     if (req.method !== 'POST') {
       sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use POST.' });
@@ -99,6 +185,18 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
 
     try {
+      // 3.1 Rate limit check (15 RPM protection)
+      if (!checkRateLimit()) {
+        console.warn(`[Gemini Rate Limiter] 15 RPM limit reached. Returning 429.`);
+        sendJsonResponse(res, 429, {
+          success: false,
+          status: 429,
+          code: 'RATE_LIMIT_EXCEEDED',
+          error: 'AI request limit reached. Please wait a moment and try again.'
+        });
+        return true;
+      }
+
       const rawBody = await parseRequestBody(req);
 
       // Validate with Zod
@@ -129,24 +227,26 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       sendJsonResponse(res, 200, aiResponse);
       return true;
     } catch (err: any) {
-      const sanitizedMessage =
-        err instanceof Error ? err.message : 'AI Assistant is temporarily unavailable. Please try again.';
 
-      // Determine appropriate status code
-      let statusCode = 500;
-      if (sanitizedMessage.includes('quota') || sanitizedMessage.includes('rate limit')) {
-        statusCode = 429;
-      } else if (sanitizedMessage.includes('not configured')) {
-        statusCode = 503;
-      }
+      const statusCode = err?.status || 500;
+      const errorCode = err?.code || 'GEMINI_ERROR';
+      const errorMessage = err instanceof Error ? err.message : 'AI Assistant is temporarily unavailable. Please try again.';
+
+      // Safe server logging
+      console.error(
+        `[Gemini Chat Error] Status: ${statusCode} | Code: ${errorCode} | Model: ${getGeminiModel()} | KeyConfigured: ${isGeminiConfigured()} | Message: ${errorMessage}`
+      );
 
       sendJsonResponse(res, statusCode, {
         success: false,
-        error: sanitizedMessage
-      } as ChatApiResponse);
+        status: statusCode,
+        code: errorCode,
+        error: errorMessage
+      } as ChatApiResponse & { status?: number; code?: string });
       return true;
     }
   }
 
   return false;
 }
+

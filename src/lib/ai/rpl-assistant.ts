@@ -19,25 +19,40 @@ export async function generateRplChatResponse(request: ChatRequest): Promise<Cha
   const ai = getGeminiClient();
   const model = getGeminiModel();
 
-  // Convert history items to Gemini contents format
+  // Convert validated history items to Gemini contents format (limit to last 8 messages)
   const contents: GeminiContentMessage[] = [];
+  const MAX_HISTORY_MESSAGES = 8;
 
   if (request.history && request.history.length > 0) {
-    for (const item of request.history) {
-      const role: 'user' | 'model' =
-        item.role === 'user' ? 'user' : 'model';
-      
+    const recentHistory = request.history.slice(-MAX_HISTORY_MESSAGES);
+    let lastContent = '';
+    let lastRole: 'user' | 'model' | null = null;
+
+    for (const item of recentHistory) {
+      const trimmedText = item.content.trim();
+      if (!trimmedText) continue;
+
+      const role: 'user' | 'model' = item.role === 'user' ? 'user' : 'model';
+
+      // Deduplicate identical repeated messages
+      if (lastRole === role && lastContent === trimmedText) {
+        continue;
+      }
+
       contents.push({
         role,
-        parts: [{ text: item.content }]
+        parts: [{ text: trimmedText }]
       });
+
+      lastRole = role;
+      lastContent = trimmedText;
     }
   }
 
   // Append current user message
   contents.push({
     role: 'user',
-    parts: [{ text: request.message }]
+    parts: [{ text: request.message.trim() }]
   });
 
   // Attempt generation with retry for transient 503 spikes
@@ -88,25 +103,51 @@ export async function generateRplChatResponse(request: ChatRequest): Promise<Cha
 
   // Handle final error if all attempts exhausted
   const errorMessage = lastError?.message || String(lastError);
+  const errorStatus = lastError?.status || lastError?.statusCode || 500;
 
-    if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('invalid api key')) {
-      throw new Error('Gemini API key is invalid or not authorized. Please check your GEMINI_API_KEY in .env.local.');
-    }
+  const error = new Error() as Error & { status?: number; code?: string };
+  error.status = errorStatus;
 
-    if (errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('429')) {
-      throw new Error('AI Assistant is currently busy. Please wait a moment and try again.');
-    }
+  if (errorStatus === 429 || errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('quota') || errorMessage.includes('429')) {
+    error.status = 429;
+    error.code = 'RATE_LIMIT_EXCEEDED';
+    error.message = 'AI request limit reached. Please wait a moment and try again.';
+    throw error;
+  }
 
-    if (errorMessage.includes('503') || errorMessage.includes('UNAVAILABLE') || errorMessage.includes('high demand')) {
-      throw new Error('AI Assistant is currently experiencing high demand. Please try again in a moment.');
-    }
+  if (errorStatus === 401 || errorStatus === 403 || errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('UNAUTHENTICATED') || errorMessage.includes('PERMISSION_DENIED') || errorMessage.includes('invalid api key')) {
+    error.status = errorStatus === 403 ? 403 : 401;
+    error.code = 'AUTHENTICATION_FAILED';
+    error.message = 'AI service authentication failed. Please check the server configuration.';
+    throw error;
+  }
 
-    if (errorMessage.includes('is not found') || errorMessage.includes('404')) {
-      throw new Error(
-        `Configured Gemini model "${model}" is not available for this API key. Please verify GEMINI_MODEL in .env.local.`
-      );
-    }
+  if (errorStatus === 404 || errorMessage.includes('is not found') || errorMessage.includes('NOT_FOUND') || errorMessage.includes('404')) {
+    error.status = 404;
+    error.code = 'MODEL_UNAVAILABLE';
+    error.message = 'Configured AI model is currently unavailable.';
+    throw error;
+  }
 
-    // Default friendly message preventing raw API/stack leaks
-    throw new Error('AI Assistant is temporarily unavailable. Please try again.');
+  if (errorStatus === 503 || errorMessage.includes('503') || errorMessage.includes('UNAVAILABLE') || errorMessage.includes('high demand')) {
+    error.status = 503;
+    error.code = 'SERVICE_UNAVAILABLE';
+    error.message = 'AI Assistant is temporarily unavailable. Please try again.';
+    throw error;
+  }
+
+  if (errorStatus === 400 || errorMessage.includes('INVALID_ARGUMENT')) {
+    error.status = 400;
+    error.code = 'INVALID_REQUEST';
+    error.message = 'Invalid request parameters. Please try again.';
+    throw error;
+  }
+
+  // Default safe error
+  error.status = errorStatus;
+  error.code = 'SERVER_ERROR';
+  error.message = 'AI Assistant is temporarily unavailable. Please try again.';
+  throw error;
 }
+
+
