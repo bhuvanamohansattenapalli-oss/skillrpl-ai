@@ -9,14 +9,36 @@ declare global {
   var prismaGlobal: PrismaClient | undefined;
 }
 
-export const prisma =
-  globalThis.prismaGlobal ??
-  new PrismaClient({
-    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error']
-  });
+let prismaInstance: PrismaClient | null = null;
 
-if (process.env.NODE_ENV !== 'production') {
-  globalThis.prismaGlobal = prisma;
+export function getPrismaClient(): PrismaClient {
+  if (!prismaInstance) {
+    prismaInstance =
+      globalThis.prismaGlobal ??
+      new PrismaClient({
+        log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error']
+      });
+    if (process.env.NODE_ENV !== 'production') {
+      globalThis.prismaGlobal = prismaInstance;
+    }
+  }
+  return prismaInstance;
+}
+
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, prop) {
+    const client = getPrismaClient();
+    return (client as any)[prop];
+  }
+});
+
+export function isDatabaseConfigured(): boolean {
+  const url = process.env.DATABASE_URL?.trim();
+  return Boolean(
+    url &&
+    !url.includes('PASTE_') &&
+    (url.startsWith('postgresql://') || url.startsWith('postgres://'))
+  );
 }
 
 export default prisma;

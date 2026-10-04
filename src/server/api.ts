@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { generateRplChatResponse } from '../lib/ai/rpl-assistant.ts';
 import { isGeminiConfigured, getGeminiModel } from '../lib/ai/gemini.ts';
 import { chatRequestSchema, skillAnalysisRequestSchema, type ChatApiResponse, type HealthResponse } from '../lib/ai/types.ts';
-import { performSkillAnalysis } from '../lib/ai/skill-analysis.ts';
+import { isDatabaseConfigured } from '../lib/db.ts';
 
 
 /**
@@ -94,6 +94,27 @@ function checkRateLimit(): boolean {
   return true;
 }
 
+function logSafeDiagnostic(params: {
+  status: number;
+  errorName: string;
+  errorCode: string;
+  errorMessage: string;
+  route: string;
+}) {
+  const model = getGeminiModel();
+  const geminiConfigured = isGeminiConfigured();
+  const databaseConfigured = isDatabaseConfigured();
+
+  const safeMsg = params.errorMessage
+    .replace(/key=[^&\s"']+/gi, 'key=[REDACTED]')
+    .replace(/AIza[0-9A-Za-z-_]{35}/g, '[REDACTED_KEY]')
+    .replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, '[REDACTED_DB_URL]');
+
+  console.error(
+    `[SERVER_DIAGNOSTIC] status=${params.status} | name=${params.errorName} | code=${params.errorCode} | model=${model} | GEMINI_API_KEY_configured=${geminiConfigured} | DATABASE_URL_configured=${databaseConfigured} | route=${params.route} | message=${safeMsg}`
+  );
+}
+
 /**
  * Main API middleware handler for /api/* routes.
  * Returns true if the route was handled, false if next() should be called.
@@ -164,12 +185,23 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     const isConfigured = isGeminiConfigured();
 
     if (!isConfigured) {
-      console.error(`[Gemini Test] Status: 503 | Code: KEY_MISSING | Model: ${model} | KeyConfigured: false | Message: GEMINI_API_KEY is not configured.`);
+      logSafeDiagnostic({
+        status: 503,
+        errorName: 'ConfigurationError',
+        errorCode: 'KEY_MISSING',
+        errorMessage: 'GEMINI_API_KEY is not configured in environment.',
+        route: pathname
+      });
+
       sendJsonResponse(res, 503, {
         success: false,
         status: 503,
+        name: 'ConfigurationError',
         code: 'KEY_MISSING',
         model,
+        geminiConfigured: false,
+        databaseConfigured: isDatabaseConfigured(),
+        route: pathname,
         error: 'GEMINI_API_KEY is not configured in environment.'
       });
       return true;
@@ -194,6 +226,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       return true;
     } catch (err: any) {
       const status = err?.status || err?.statusCode || 500;
+      const errorName = err?.name || 'Error';
       const code = err?.code || (status === 429 ? 'RESOURCE_EXHAUSTED' : status === 404 ? 'NOT_FOUND' : status === 401 ? 'UNAUTHENTICATED' : 'ERROR');
       const rawMsg = err?.message || String(err);
 
@@ -206,16 +239,23 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         safeMsg = rawMsg.replace(/key=[^&\s]+/gi, 'key=[REDACTED]');
       }
 
-      // Safe server-side diagnostic logging (NEVER logs actual key, secrets, or full env)
-      console.error(
-        `[Gemini Diagnostic] Status: ${status} | Code: ${code} | Model: ${model} | KeyConfigured: ${isConfigured} | Error: ${safeMsg.slice(0, 300)}`
-      );
+      logSafeDiagnostic({
+        status: status >= 400 && status < 600 ? status : 500,
+        errorName,
+        errorCode: code,
+        errorMessage: safeMsg,
+        route: pathname
+      });
 
       sendJsonResponse(res, status >= 400 && status < 600 ? status : 500, {
         success: false,
-        status,
+        status: status >= 400 && status < 600 ? status : 500,
+        name: errorName,
         code,
         model,
+        geminiConfigured: isConfigured,
+        databaseConfigured: isDatabaseConfigured(),
+        route: pathname,
         error: safeMsg
       });
       return true;
@@ -272,23 +312,34 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       sendJsonResponse(res, 200, aiResponse);
       return true;
     } catch (err: any) {
-
       const statusCode = err?.status || 500;
+      const errorName = err?.name || 'Error';
       const errorCode = err?.code || 'GEMINI_ERROR';
-      const errorMessage = err instanceof Error ? err.message : 'AI Assistant is temporarily unavailable. Please try again.';
+      const rawMessage = err instanceof Error ? err.message : String(err);
+      const safeMessage = rawMessage
+        .replace(/key=[^&\s"']+/gi, 'key=[REDACTED]')
+        .replace(/AIza[0-9A-Za-z-_]{35}/g, '[REDACTED_KEY]')
+        .replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, '[REDACTED_DB_URL]');
 
-      // Safe server logging
-      console.error(
-        `[Gemini Chat Error] Status: ${statusCode} | Code: ${errorCode} | Model: ${getGeminiModel()} | KeyConfigured: ${isGeminiConfigured()} | Message: ${errorMessage}`
-      );
+      logSafeDiagnostic({
+        status: statusCode >= 400 && statusCode < 600 ? statusCode : 500,
+        errorName,
+        errorCode,
+        errorMessage: safeMessage,
+        route: pathname
+      });
 
-      sendJsonResponse(res, statusCode, {
+      sendJsonResponse(res, statusCode >= 400 && statusCode < 600 ? statusCode : 500, {
         success: false,
-        status: statusCode,
+        status: statusCode >= 400 && statusCode < 600 ? statusCode : 500,
+        name: errorName,
         code: errorCode,
         model: getGeminiModel(),
-        error: errorMessage
-      } as ChatApiResponse & { status?: number; code?: string; model?: string });
+        geminiConfigured: isGeminiConfigured(),
+        databaseConfigured: isDatabaseConfigured(),
+        route: pathname,
+        error: safeMessage
+      } as ChatApiResponse & { status?: number; name?: string; code?: string; model?: string; geminiConfigured?: boolean; databaseConfigured?: boolean; route?: string });
       return true;
     }
   }
@@ -344,7 +395,8 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      // Execute AI Skill Analysis using dedicated Gemini 3.6 Flash service
+      // Dynamically import performSkillAnalysis to isolate AI chat/test from Prisma
+      const { performSkillAnalysis } = await import('../lib/ai/skill-analysis.ts');
       const analysisResult = await performSkillAnalysis(parseResult.data);
 
       sendJsonResponse(res, 200, {
@@ -355,19 +407,32 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       return true;
     } catch (err: any) {
       const statusCode = err?.status || 500;
+      const errorName = err?.name || 'Error';
       const errorCode = err?.code || 'ANALYSIS_ERROR';
-      const errorMessage =
-        err instanceof Error ? err.message : 'AI Skill Analysis is temporarily unavailable. Please try again.';
+      const rawMessage = err instanceof Error ? err.message : String(err);
+      const safeMessage = rawMessage
+        .replace(/key=[^&\s"']+/gi, 'key=[REDACTED]')
+        .replace(/AIza[0-9A-Za-z-_]{35}/g, '[REDACTED_KEY]')
+        .replace(/postgres(?:ql)?:\/\/[^\s"']+/gi, '[REDACTED_DB_URL]');
 
-      console.error(
-        `[Skill Analysis Error] Status: ${statusCode} | Code: ${errorCode} | Model: ${getGeminiModel()} | KeyConfigured: ${isGeminiConfigured()} | Message: ${errorMessage}`
-      );
+      logSafeDiagnostic({
+        status: statusCode >= 400 && statusCode < 600 ? statusCode : 500,
+        errorName,
+        errorCode,
+        errorMessage: safeMessage,
+        route: pathname
+      });
 
-      sendJsonResponse(res, statusCode, {
+      sendJsonResponse(res, statusCode >= 400 && statusCode < 600 ? statusCode : 500, {
         success: false,
-        status: statusCode,
+        status: statusCode >= 400 && statusCode < 600 ? statusCode : 500,
+        name: errorName,
         code: errorCode,
-        error: errorMessage
+        model: getGeminiModel(),
+        geminiConfigured: isGeminiConfigured(),
+        databaseConfigured: isDatabaseConfigured(),
+        route: pathname,
+        error: safeMessage
       });
       return true;
     }

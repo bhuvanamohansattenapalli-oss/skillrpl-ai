@@ -152,8 +152,10 @@ export const AiAssistantPage: React.FC = () => {
       });
 
       let data: any = null;
+      let rawText = '';
       try {
-        data = await response.json();
+        rawText = await response.text();
+        data = JSON.parse(rawText);
       } catch {
         // In case of non-JSON response from server
       }
@@ -178,6 +180,10 @@ export const AiAssistantPage: React.FC = () => {
           if (errorCode && !errorMessage.includes(errorCode)) {
             errorMessage = `[${errorCode}] ${errorMessage}`;
           }
+        } else if (rawText && !rawText.trim().startsWith('<')) {
+          // Extract plain-text error from server instead of masking
+          const safeText = rawText.trim().slice(0, 200);
+          errorMessage = `[HTTP ${statusCode}] ${safeText}`;
         } else {
           // Fallback only when response body has no diagnostic error
           if (statusCode === 429) {
