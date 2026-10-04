@@ -329,6 +329,204 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
   }
 
+  // 5. Assessor Candidate Evaluation Data: GET /api/assessor/candidate-evaluation
+  if (pathname === '/api/assessor/candidate-evaluation') {
+    if (req.method !== 'GET') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use GET.' });
+      return true;
+    }
+
+    try {
+      const { prisma } = await import('../lib/db.ts');
+      const { ensureAssessorDemoData } = await import('../lib/assessor/seed-assessor-data.ts');
+
+      await ensureAssessorDemoData();
+
+      const application = await prisma.rPLApplication.findFirst({
+        where: { applicationNumber: 'RPL-IND-2026-0842' },
+        include: {
+          workerProfile: true,
+          qualificationPack: {
+            include: {
+              assessmentCriteria: true
+            }
+          },
+          assessments: {
+            include: {
+              scores: {
+                include: {
+                  criterion: true
+                }
+              },
+              assessorProfile: true,
+              competencyResults: true
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 1
+          },
+          aiAnalyses: {
+            orderBy: { createdAt: 'desc' },
+            take: 1
+          }
+        }
+      });
+
+      if (!application) {
+        sendJsonResponse(res, 404, { success: false, error: 'Application not found' });
+        return true;
+      }
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        data: application
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Assessor Evaluation API Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Server error' });
+      return true;
+    }
+  }
+
+  // 6. Assessor Assessment Submission: POST /api/assessor/submit-assessment
+  if (pathname === '/api/assessor/submit-assessment') {
+    if (req.method !== 'POST') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use POST.' });
+      return true;
+    }
+
+    try {
+      const rawBody: any = await parseRequestBody(req);
+      const { assessmentId, applicationId, scores, remarks, isFinal, practicalTaskDemo } = rawBody;
+
+      if (!assessmentId || !scores || !Array.isArray(scores)) {
+        sendJsonResponse(res, 400, { success: false, error: 'Missing assessmentId or scores array' });
+        return true;
+      }
+
+      const { prisma } = await import('../lib/db.ts');
+
+      // Update or create each AssessmentScore in Supabase
+      for (const item of scores) {
+        if (item.criterionId) {
+          const existingScore = await prisma.assessmentScore.findFirst({
+            where: {
+              assessmentId,
+              criterionId: item.criterionId
+            }
+          });
+
+          if (existingScore) {
+            await prisma.assessmentScore.update({
+              where: { id: existingScore.id },
+              data: {
+                scoreAwarded: Number(item.scoreAwarded ?? item.score ?? 0),
+                remarks: item.remarks || null
+              }
+            });
+          } else {
+            await prisma.assessmentScore.create({
+              data: {
+                assessmentId,
+                criterionId: item.criterionId,
+                scoreAwarded: Number(item.scoreAwarded ?? item.score ?? 0),
+                remarks: item.remarks || null
+              }
+            });
+          }
+        }
+      }
+
+      // Calculate total score and overall result
+      const allScores = await prisma.assessmentScore.findMany({
+        where: { assessmentId },
+        include: { criterion: true }
+      });
+
+      let totalWeighted = 0;
+      let totalMax = 0;
+      for (const s of allScores) {
+        const weight = s.criterion?.weightage || 20;
+        const max = s.criterion?.maxScore || 5;
+        totalWeighted += (s.scoreAwarded / max) * weight;
+        totalMax += weight;
+      }
+
+      const percentage = totalMax > 0 ? Math.round((totalWeighted / totalMax) * 100) : 80;
+      const isCompetent = percentage >= 70;
+
+      // Update Assessment record
+      const updatedAssessment = await prisma.assessment.update({
+        where: { id: assessmentId },
+        data: {
+          status: isFinal ? 'COMPLETED' : 'IN_PROGRESS',
+          notes: remarks || null,
+          practicalTaskDemo: practicalTaskDemo || undefined,
+          conductedAt: isFinal ? new Date() : undefined
+        }
+      });
+
+      // If finalizing decision, update Application and CompetencyResult
+      let competencyResult: any = null;
+      if (isFinal && applicationId) {
+        await prisma.rPLApplication.update({
+          where: { id: applicationId },
+          data: {
+            status: isCompetent ? 'COMPETENT_CERTIFIED' : 'NOT_YET_COMPETENT',
+            completedAt: new Date()
+          }
+        });
+
+        // Upsert CompetencyResult
+        const existingResult = await prisma.competencyResult.findFirst({
+          where: { rplApplicationId: applicationId }
+        });
+
+        const certNum = `CERT-NSDC-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+
+        if (existingResult) {
+          competencyResult = await prisma.competencyResult.update({
+            where: { id: existingResult.id },
+            data: {
+              assessmentId,
+              overallResult: isCompetent ? 'COMPETENT' : 'NOT_YET_COMPETENT',
+              finalNsqfLevel: 5,
+              certifiedDate: isCompetent ? new Date() : null,
+              assessorRemarks: remarks || 'Standardized assessment rubric verified by accredited assessor.'
+            }
+          });
+        } else {
+          competencyResult = await prisma.competencyResult.create({
+            data: {
+              rplApplicationId: applicationId,
+              assessmentId,
+              overallResult: isCompetent ? 'COMPETENT' : 'NOT_YET_COMPETENT',
+              finalNsqfLevel: 5,
+              certifiedDate: isCompetent ? new Date() : null,
+              certificateNumber: isCompetent ? certNum : null,
+              assessorRemarks: remarks || 'Standardized assessment rubric verified by accredited assessor.'
+            }
+          });
+        }
+      }
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        data: {
+          assessment: updatedAssessment,
+          percentage,
+          isCompetent,
+          competencyResult
+        }
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Assessor Submit Assessment Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Server error' });
+      return true;
+    }
+  }
+
   return false;
 }
 
