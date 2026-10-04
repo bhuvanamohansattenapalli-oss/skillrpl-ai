@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { generateRplChatResponse } from '../lib/ai/rpl-assistant.ts';
 import { isGeminiConfigured, getGeminiModel } from '../lib/ai/gemini.ts';
-import { chatRequestSchema, skillAnalysisRequestSchema, type ChatApiResponse, type HealthResponse } from '../lib/ai/types.ts';
+import { chatRequestSchema, skillAnalysisRequestSchema, type ChatApiResponse } from '../lib/ai/types.ts';
 import { isDatabaseConfigured } from '../lib/db.ts';
 
 
@@ -147,30 +147,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       return true;
     }
 
-    let databaseStatus: 'connected' | 'disconnected' | 'not_configured' = 'not_configured';
-    const dbUrl = process.env.DATABASE_URL?.trim();
-
-    if (
-      dbUrl &&
-      !dbUrl.includes('PASTE_') &&
-      (dbUrl.startsWith('postgresql://') || dbUrl.startsWith('postgres://'))
-    ) {
-      try {
-        const { prisma } = await import('../lib/db.ts');
-        await prisma.$queryRaw`SELECT 1`;
-        databaseStatus = 'connected';
-      } catch {
-        databaseStatus = 'disconnected';
-      }
-    }
-
-    const healthData: HealthResponse = {
-      status: 'ok',
-      database: databaseStatus,
-      geminiConfigured: isGeminiConfigured(),
-      model: getGeminiModel()
-    };
-    sendJsonResponse(res, 200, healthData);
+    sendJsonResponse(res, 200, { status: 'ok' });
     return true;
   }
 
