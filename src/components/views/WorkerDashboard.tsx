@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   FileText,
   FileCheck,
@@ -9,9 +9,17 @@ import {
   ArrowRight,
   Play,
   ChevronRight,
-  ArrowUp
+  ArrowUp,
+  PlusCircle,
+  Send,
+  Eye,
+  RefreshCw,
+  Sparkles
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
+import { fetchWorkerApplications, submitWorkerApplication } from '../../lib/api/worker-application';
+import type { RPLApplicationListItem } from '../../types';
 import heroImg from '../../assets/taj_mahal_hero.jpg';
 import nightImg from '../../assets/taj_mahal_night.jpg';
 import {
@@ -40,8 +48,53 @@ export const WorkerDashboard: React.FC = () => {
     setIsWatchModalOpen,
     setIsJobModalOpen,
     setIsLearningModalOpen,
-    showToast
+    showToast,
+    setActiveApplicationId
   } = useApp();
+  const { session } = useAuth();
+
+  const [applications, setApplications] = useState<RPLApplicationListItem[]>([]);
+  const [loadingApps, setLoadingApps] = useState(true);
+  const [submittingId, setSubmittingId] = useState<string | null>(null);
+
+  const loadApplications = async () => {
+    setLoadingApps(true);
+    try {
+      const res = await fetchWorkerApplications(session?.access_token);
+      if (res.success) {
+        setApplications(res.applications);
+      }
+    } catch (err) {
+      console.warn('Failed to load applications:', err);
+    } finally {
+      setLoadingApps(false);
+    }
+  };
+
+  useEffect(() => {
+    loadApplications();
+  }, [session?.access_token]);
+
+  const handleSubmitApplication = async (appId: string) => {
+    if (!session?.access_token) {
+      showToast('Please sign in to submit your application.', 'warning');
+      return;
+    }
+    setSubmittingId(appId);
+    try {
+      const res = await submitWorkerApplication(appId, session.access_token);
+      if (res.success) {
+        showToast('RPL Application submitted successfully to Accredited Assessor!', 'success');
+        await loadApplications();
+      } else {
+        showToast(res.error || 'Failed to submit application', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Submission error', 'error');
+    } finally {
+      setSubmittingId(null);
+    }
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }} className="animate-fade-in">
@@ -466,6 +519,342 @@ export const WorkerDashboard: React.FC = () => {
       >
         {/* LEFT COLUMN: RPL Journey + Popular Skill Categories */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Card: My RPL Applications */}
+          <div
+            style={{
+              background: 'rgba(255, 255, 255, 0.92)',
+              backdropFilter: 'blur(16px)',
+              WebkitBackdropFilter: 'blur(16px)',
+              border: '1px solid rgba(255, 255, 255, 0.95)',
+              borderRadius: '22px',
+              boxShadow: '0 4px 20px rgba(18, 59, 93, 0.05), inset 0 1px 1px #ffffff',
+              padding: '24px 26px'
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px', flexWrap: 'wrap', gap: '10px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#0f2744', margin: 0 }}>
+                    My RPL Applications
+                  </h3>
+                  <span
+                    style={{
+                      background: 'rgba(2, 132, 199, 0.1)',
+                      color: '#0284c7',
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: '999px',
+                      border: '1px solid rgba(2, 132, 199, 0.2)'
+                    }}
+                  >
+                    {applications.length} Active
+                  </span>
+                </div>
+                <p style={{ fontSize: '12.5px', color: '#627d98', margin: '4px 0 0 0' }}>
+                  Manage your self-declarations, AI skill reviews, and assessor evaluations.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                <button
+                  onClick={loadApplications}
+                  title="Refresh Applications"
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '8px',
+                    border: '1px solid rgba(203, 213, 225, 0.6)',
+                    background: '#f8fafc',
+                    color: '#64748b',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <RefreshCw size={14} className={loadingApps ? 'animate-spin' : ''} />
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveApplicationId(null);
+                    setCurrentView('declaration');
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 16px',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                    color: '#ffffff',
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(2, 132, 199, 0.25)'
+                  }}
+                >
+                  <PlusCircle size={15} />
+                  <span>Start New Application</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Application List / Empty State */}
+            {loadingApps ? (
+              <div style={{ padding: '30px 20px', textAlign: 'center', color: '#64748b' }}>
+                <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 8px auto', display: 'block' }} />
+                <span style={{ fontSize: '13px' }}>Loading your RPL applications...</span>
+              </div>
+            ) : applications.length === 0 ? (
+              <div
+                style={{
+                  padding: '36px 20px',
+                  textAlign: 'center',
+                  background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
+                  borderRadius: '16px',
+                  border: '1px dashed #cbd5e1'
+                }}
+              >
+                <div
+                  style={{
+                    width: '52px',
+                    height: '52px',
+                    borderRadius: '16px',
+                    background: 'rgba(2, 132, 199, 0.1)',
+                    color: '#0284c7',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: '12px'
+                  }}
+                >
+                  <FileText size={26} />
+                </div>
+                <h4 style={{ fontSize: '16px', fontWeight: 700, color: '#0f2744', margin: '0 0 6px 0' }}>
+                  No Active RPL Applications
+                </h4>
+                <p style={{ fontSize: '13px', color: '#64748b', maxWidth: '420px', margin: '0 auto 18px auto', lineHeight: 1.5 }}>
+                  You haven't created any Recognition of Prior Learning applications yet. Begin your self-declaration to map your informal experience.
+                </p>
+                <button
+                  onClick={() => {
+                    setActiveApplicationId(null);
+                    setCurrentView('declaration');
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '10px 20px',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                    color: '#ffffff',
+                    fontWeight: 700,
+                    fontSize: '13.5px',
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 14px rgba(2, 132, 199, 0.3)'
+                  }}
+                >
+                  <Sparkles size={16} />
+                  <span>Start your first RPL assessment</span>
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {applications.map((app) => {
+                  let statusBadgeColor = '#64748b';
+                  let statusBg = '#f1f5f9';
+                  let statusText = 'Draft';
+
+                  if (app.status === 'SELF_DECLARATION_COMPLETED') {
+                    statusBadgeColor = '#0284c7';
+                    statusBg = '#e0f2fe';
+                    statusText = 'Self-Declaration Completed';
+                  } else if (app.status === 'ASSESSMENT_READY') {
+                    statusBadgeColor = '#7c3aed';
+                    statusBg = '#f3e8ff';
+                    statusText = 'Assessment Ready';
+                  } else if (app.status === 'SUBMITTED') {
+                    statusBadgeColor = '#b45309';
+                    statusBg = '#fef3c7';
+                    statusText = 'Submitted to Assessor';
+                  } else if (app.status === 'UNDER_ASSESSMENT') {
+                    statusBadgeColor = '#4338ca';
+                    statusBg = '#e0e7ff';
+                    statusText = 'Under Assessment';
+                  } else if (app.status === 'COMPLETED') {
+                    statusBadgeColor = '#047857';
+                    statusBg = '#d1fae5';
+                    statusText = 'Certified / Completed';
+                  }
+
+                  const isSubmissible =
+                    app.status === 'DRAFT' ||
+                    app.status === 'SELF_DECLARATION_COMPLETED' ||
+                    app.status === 'ASSESSMENT_READY';
+
+                  return (
+                    <div
+                      key={app.id}
+                      style={{
+                        padding: '16px 18px',
+                        borderRadius: '14px',
+                        border: '1px solid rgba(226, 232, 240, 0.8)',
+                        background: '#ffffff',
+                        boxShadow: '0 2px 8px rgba(15, 23, 42, 0.03)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '12px',
+                        transition: 'all 0.2s ease'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '8px' }}>
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '15px', fontWeight: 800, color: '#0f2744' }}>
+                              {app.tradeTitle}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: '11px',
+                                fontFamily: 'monospace',
+                                background: '#f1f5f9',
+                                color: '#475569',
+                                padding: '2px 6px',
+                                borderRadius: '6px'
+                              }}
+                            >
+                              {app.applicationNumber}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '4px', fontSize: '12px', color: '#64748b' }}>
+                            <span>Created: {new Date(app.createdAt).toLocaleDateString()}</span>
+                            <span>•</span>
+                            <span>Updated: {new Date(app.updatedAt).toLocaleDateString()}</span>
+                            <span>•</span>
+                            <span>Step {app.currentStep} of 7</span>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span
+                            style={{
+                              fontSize: '11.5px',
+                              fontWeight: 700,
+                              color: statusBadgeColor,
+                              background: statusBg,
+                              padding: '4px 10px',
+                              borderRadius: '999px',
+                              border: `1px solid ${statusBadgeColor}33`
+                            }}
+                          >
+                            {statusText}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 600, color: '#64748b', marginBottom: '4px' }}>
+                          <span>Progress</span>
+                          <span>{app.progressPercentage}%</span>
+                        </div>
+                        <div style={{ width: '100%', height: '6px', borderRadius: '3px', background: '#e2e8f0', overflow: 'hidden' }}>
+                          <div
+                            style={{
+                              width: `${app.progressPercentage}%`,
+                              height: '100%',
+                              borderRadius: '3px',
+                              background: 'linear-gradient(90deg, #0284c7 0%, #10b981 100%)',
+                              transition: 'width 0.4s ease'
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+                        <button
+                          onClick={() => {
+                            setActiveApplicationId(app.id);
+                            setCurrentView('declaration');
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                            border: '1px solid #cbd5e1',
+                            background: '#f8fafc',
+                            color: '#334155',
+                            fontSize: '12.5px',
+                            fontWeight: 600,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <Eye size={13} />
+                          <span>View</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setActiveApplicationId(app.id);
+                            setCurrentView('declaration');
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '6px 14px',
+                            borderRadius: '8px',
+                            border: 'none',
+                            background: '#0284c7',
+                            color: '#ffffff',
+                            fontSize: '12.5px',
+                            fontWeight: 700,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          <span>Continue</span>
+                          <ChevronRight size={14} />
+                        </button>
+
+                        {isSubmissible && (
+                          <button
+                            onClick={() => handleSubmitApplication(app.id)}
+                            disabled={submittingId === app.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '6px 14px',
+                              borderRadius: '8px',
+                              border: 'none',
+                              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                              color: '#ffffff',
+                              fontSize: '12.5px',
+                              fontWeight: 700,
+                              cursor: submittingId === app.id ? 'not-allowed' : 'pointer',
+                              boxShadow: '0 2px 6px rgba(16, 185, 129, 0.25)'
+                            }}
+                          >
+                            <Send size={13} />
+                            <span>{submittingId === app.id ? 'Submitting...' : 'Submit'}</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Card: Your RPL Journey */}
           <div
             style={{

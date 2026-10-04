@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SkillRPL AI — AI-Assisted Recognition of Prior Learning</title>
     <meta name="description" content="AI-Assisted Recognition of Prior Learning (RPL) Platform — Empowering skilled informal workers with assessor-validated national qualification pathways." />
+    <link rel="manifest" href="/manifest.json" />
     <!-- Google Fonts: Inter & Plus Jakarta Sans -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,5 +15,14 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/sw.js').catch(function(err) {
+            console.log('[SW] ServiceWorker registration optional/failed:', err);
+          });
+        });
+      }
+    </script>
   </body>
 </html>

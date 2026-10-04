@@ -1,0 +1,16 @@
+{
+  "name": "SkillRPL AI",
+  "short_name": "SkillRPL",
+  "description": "AI-Assisted Recognition of Prior Learning (RPL) Platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d1b2a",
+  "theme_color": "#0f2b48",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}

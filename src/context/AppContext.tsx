@@ -95,6 +95,10 @@ interface AppContextType {
   toast: ToastState | null;
   showToast: (text: string, type?: ToastState['type']) => void;
   hideToast: () => void;
+
+  // Active Worker RPL Application
+  activeApplicationId: string | null;
+  setActiveApplicationId: (id: string | null) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -150,6 +154,7 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const [isLearningModalOpen, setIsLearningModalOpen] = useState(false);
   const [isHelpModalOpen, setIsHelpModalOpen] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [activeApplicationId, setActiveApplicationId] = useState<string | null>(null);
 
   // Sync URL history state
   const setCurrentView = (view: AppView) => {
@@ -391,7 +396,9 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         setIsHelpModalOpen,
         toast,
         showToast,
-        hideToast
+        hideToast,
+        activeApplicationId,
+        setActiveApplicationId
       }}
     >
       {children}

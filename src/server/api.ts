@@ -806,6 +806,435 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
   }
 
+  // =========================================================================
+  // 10. WORKER RPL APPLICATIONS WORKFLOW (PHASE 2.2)
+  // =========================================================================
+
+  // Helper: Authenticate worker from Bearer token
+  async function resolveAuthenticatedWorker(request: IncomingMessage) {
+    const authHeader = request.headers['authorization'];
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
+    if (!token) {
+      throw new Error('Authentication required. Missing Bearer token.');
+    }
+
+    const { verifySupabaseToken } = await import('./auth.ts');
+    const authUser = await verifySupabaseToken(token);
+    if (!authUser || !authUser.email) {
+      throw new Error('Invalid authentication session.');
+    }
+
+    const { prisma } = await import('../lib/db.ts');
+    let user = await prisma.user.findFirst({
+      where: { email: authUser.email.toLowerCase() },
+      include: { workerProfile: true }
+    });
+
+    if (!user) {
+      const { syncUserProfile } = await import('./auth.ts');
+      await syncUserProfile({
+        userId: authUser.id,
+        email: authUser.email.toLowerCase(),
+        role: 'WORKER',
+        name: (authUser.user_metadata?.full_name || authUser.user_metadata?.name || 'Worker Candidate') as string
+      });
+      user = await prisma.user.findFirst({
+        where: { email: authUser.email.toLowerCase() },
+        include: { workerProfile: true }
+      });
+    }
+
+    if (!user?.workerProfile) {
+      const newProfile = await prisma.workerProfile.create({
+        data: {
+          userId: user!.id,
+          name: (authUser.user_metadata?.full_name || authUser.user_metadata?.name || 'Worker Candidate') as string,
+          email: user!.email,
+          trade: 'General Technical',
+          yearsOfExperience: 2
+        }
+      });
+      return { user, workerProfile: newProfile };
+    }
+
+    return { user, workerProfile: user.workerProfile };
+  }
+
+  // 10.1 List Worker RPL Applications: GET /api/worker/applications
+  if (pathname === '/api/worker/applications') {
+    if (req.method !== 'GET') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use GET.' });
+      return true;
+    }
+
+    try {
+      const { workerProfile } = await resolveAuthenticatedWorker(req);
+      const { prisma } = await import('../lib/db.ts');
+
+      const applications = await prisma.rPLApplication.findMany({
+        where: { workerProfileId: workerProfile.id },
+        include: {
+          experiences: true,
+          skills: true,
+          aiAnalyses: {
+            orderBy: { createdAt: 'desc' },
+            take: 1
+          }
+        },
+        orderBy: { updatedAt: 'desc' }
+      });
+
+      const formatted = applications.map((app) => {
+        let progress = 15;
+        if (app.status === 'COMPLETED' || app.status === 'COMPETENT_CERTIFIED') progress = 100;
+        else if (app.status === 'UNDER_ASSESSMENT' || app.status === 'UNDER_ASSESSOR_REVIEW') progress = 85;
+        else if (app.status === 'SUBMITTED') progress = 75;
+        else if (app.status === 'ASSESSMENT_READY') progress = 60;
+        else if (app.status === 'SELF_DECLARATION_COMPLETED') progress = 40;
+        else if (app.currentStep > 1) progress = Math.min(65, Math.round((app.currentStep / 7) * 100));
+
+        return {
+          id: app.id,
+          applicationNumber: app.applicationNumber,
+          tradeTitle: app.tradeTitle || 'General Technical Trade',
+          status: app.status,
+          currentStep: app.currentStep,
+          progressPercentage: progress,
+          createdAt: app.createdAt.toISOString(),
+          updatedAt: app.updatedAt.toISOString(),
+          submittedAt: app.submittedAt?.toISOString(),
+          completedAt: app.completedAt?.toISOString(),
+          hasAiAnalysis: app.aiAnalyses.length > 0
+        };
+      });
+
+      sendJsonResponse(res, 200, { success: true, applications: formatted });
+      return true;
+    } catch (err: any) {
+      console.error('[Worker Applications List Error]', err);
+      sendJsonResponse(res, 401, { success: false, error: err.message || 'Authentication failed' });
+      return true;
+    }
+  }
+
+  // 10.2 Get Single RPL Application: GET /api/worker/application
+  if (pathname === '/api/worker/application' && req.method === 'GET') {
+    try {
+      const applicationId = parsedUrl.searchParams.get('id');
+      if (!applicationId) {
+        sendJsonResponse(res, 400, { success: false, error: 'Application ID is required.' });
+        return true;
+      }
+
+      const { workerProfile } = await resolveAuthenticatedWorker(req);
+      const { prisma } = await import('../lib/db.ts');
+
+      const application = await prisma.rPLApplication.findFirst({
+        where: {
+          id: applicationId,
+          workerProfileId: workerProfile.id // Security: Worker can only access their own application
+        },
+        include: {
+          experiences: { orderBy: { createdAt: 'asc' } },
+          skills: { orderBy: { createdAt: 'asc' } },
+          aiAnalyses: { orderBy: { createdAt: 'desc' } }
+        }
+      });
+
+      if (!application) {
+        sendJsonResponse(res, 404, { success: false, error: 'Application not found or unauthorized.' });
+        return true;
+      }
+
+      sendJsonResponse(res, 200, { success: true, application });
+      return true;
+    } catch (err: any) {
+      console.error('[Worker Application Get Error]', err);
+      sendJsonResponse(res, 401, { success: false, error: err.message || 'Authentication failed' });
+      return true;
+    }
+  }
+
+  // 10.3 Create or Save RPL Application Draft: POST /api/worker/application
+  if (pathname === '/api/worker/application' && req.method === 'POST') {
+    try {
+      const { workerProfile } = await resolveAuthenticatedWorker(req);
+      const body: any = await parseRequestBody(req);
+      const {
+        id,
+        currentStep = 1,
+        status = 'DRAFT',
+        tradeTitle,
+        formData,
+        experiences = [],
+        skills = []
+      } = body;
+
+      const { prisma } = await import('../lib/db.ts');
+
+      let applicationRecord;
+
+      if (id) {
+        // Verify application belongs to this worker
+        const existing = await prisma.rPLApplication.findFirst({
+          where: { id, workerProfileId: workerProfile.id }
+        });
+
+        if (!existing) {
+          sendJsonResponse(res, 404, { success: false, error: 'Application not found or unauthorized.' });
+          return true;
+        }
+
+        // Update application
+        applicationRecord = await prisma.rPLApplication.update({
+          where: { id },
+          data: {
+            currentStep: Number(currentStep) || existing.currentStep,
+            status: status || existing.status,
+            tradeTitle: tradeTitle || existing.tradeTitle || 'General Technical Trade',
+            formData: formData ? JSON.parse(JSON.stringify(formData)) : existing.formData,
+            updatedAt: new Date()
+          }
+        });
+      } else {
+        // Create new application
+        const randomNum = Math.floor(100000 + Math.random() * 900000);
+        const applicationNumber = `RPL-2026-${randomNum}`;
+
+        applicationRecord = await prisma.rPLApplication.create({
+          data: {
+            applicationNumber,
+            workerProfileId: workerProfile.id,
+            status: status || 'DRAFT',
+            currentStep: Number(currentStep) || 1,
+            tradeTitle: tradeTitle || 'General Technical Trade',
+            formData: formData ? JSON.parse(JSON.stringify(formData)) : undefined
+          }
+        });
+      }
+
+      // Sync experiences relational records if provided
+      if (Array.isArray(experiences) && experiences.length > 0) {
+        await prisma.rPLApplicationExperience.deleteMany({
+          where: { rplApplicationId: applicationRecord.id }
+        });
+
+        for (const exp of experiences) {
+          if (exp.company || exp.role) {
+            await prisma.rPLApplicationExperience.create({
+              data: {
+                rplApplicationId: applicationRecord.id,
+                company: exp.company || 'Self-employed / Workplace',
+                role: exp.role || 'Skilled Worker',
+                startDate: exp.startDate || '2020',
+                endDate: exp.endDate || null,
+                isCurrent: Boolean(exp.isCurrent),
+                responsibilities: exp.responsibilities || '',
+                tasksPerformed: exp.tasksPerformed || '',
+                toolsUsed: exp.toolsUsed || ''
+              }
+            });
+          }
+        }
+      }
+
+      // Sync skills relational records if provided
+      if (Array.isArray(skills) && skills.length > 0) {
+        await prisma.rPLApplicationSkill.deleteMany({
+          where: { rplApplicationId: applicationRecord.id }
+        });
+
+        for (const sk of skills) {
+          if (sk.taskName) {
+            await prisma.rPLApplicationSkill.create({
+              data: {
+                rplApplicationId: applicationRecord.id,
+                taskName: sk.taskName,
+                experienceText: sk.experienceText || 'Self-declared',
+                toolsUsed: sk.toolsUsed || '',
+                confidenceLevel: sk.confidenceLevel || 'Intermediate',
+                statusLabel: 'Self-declared — pending assessment'
+              }
+            });
+          }
+        }
+      }
+
+      // Re-fetch complete application
+      const fullApp = await prisma.rPLApplication.findUnique({
+        where: { id: applicationRecord.id },
+        include: {
+          experiences: true,
+          skills: true,
+          aiAnalyses: { orderBy: { createdAt: 'desc' }, take: 1 }
+        }
+      });
+
+      sendJsonResponse(res, 200, { success: true, application: fullApp });
+      return true;
+    } catch (err: any) {
+      console.error('[Worker Save Application Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to save application.' });
+      return true;
+    }
+  }
+
+  // 10.4 Submit RPL Application: POST /api/worker/application/submit
+  if (pathname === '/api/worker/application/submit' && req.method === 'POST') {
+    try {
+      const { workerProfile } = await resolveAuthenticatedWorker(req);
+      const body: any = await parseRequestBody(req);
+      const { id } = body;
+
+      if (!id) {
+        sendJsonResponse(res, 400, { success: false, error: 'Application ID is required for submission.' });
+        return true;
+      }
+
+      const { prisma } = await import('../lib/db.ts');
+
+      const existing = await prisma.rPLApplication.findFirst({
+        where: { id, workerProfileId: workerProfile.id }
+      });
+
+      if (!existing) {
+        sendJsonResponse(res, 404, { success: false, error: 'Application not found or unauthorized.' });
+        return true;
+      }
+
+      // Transition to SUBMITTED
+      const updated = await prisma.rPLApplication.update({
+        where: { id },
+        data: {
+          status: 'SUBMITTED',
+          submittedAt: new Date(),
+          currentStep: 7
+        },
+        include: {
+          experiences: true,
+          skills: true,
+          aiAnalyses: true
+        }
+      });
+
+      // Find an accredited assessor or default assessor to assign
+      const defaultAssessor = await prisma.assessorProfile.findFirst();
+      if (defaultAssessor) {
+        const existingAssessment = await prisma.assessment.findFirst({
+          where: { rplApplicationId: id }
+        });
+        if (!existingAssessment) {
+          await prisma.assessment.create({
+            data: {
+              rplApplicationId: id,
+              assessorProfileId: defaultAssessor.id,
+              status: 'SCHEDULED',
+              notes: 'Worker self-declaration and skills submitted for official RPL assessment.'
+            }
+          });
+        }
+      }
+
+      sendJsonResponse(res, 200, { success: true, application: updated });
+      return true;
+    } catch (err: any) {
+      console.error('[Worker Submit Application Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to submit application.' });
+      return true;
+    }
+  }
+
+  // 10.5 Analyze RPL Application Skills with Gemini: POST /api/worker/application/analyze
+  if (pathname === '/api/worker/application/analyze' && req.method === 'POST') {
+    try {
+      const { workerProfile } = await resolveAuthenticatedWorker(req);
+      const body: any = await parseRequestBody(req);
+      const {
+        applicationId,
+        occupation = 'Skilled Worker',
+        yearsExperience = 3,
+        experience = '',
+        tasks = [],
+        tools = [],
+        skills = [],
+        additionalExperience = ''
+      } = body;
+
+      if (!applicationId) {
+        sendJsonResponse(res, 400, { success: false, error: 'Application ID is required for AI analysis.' });
+        return true;
+      }
+
+      const { prisma } = await import('../lib/db.ts');
+
+      const existingApp = await prisma.rPLApplication.findFirst({
+        where: { id: applicationId, workerProfileId: workerProfile.id }
+      });
+
+      if (!existingApp) {
+        sendJsonResponse(res, 404, { success: false, error: 'Application not found or unauthorized.' });
+        return true;
+      }
+
+      // Perform AI Analysis using existing Gemini 3.6 Flash integration
+      const { performSkillAnalysis } = await import('../lib/ai/skill-analysis.ts');
+
+      const analysisResult = await performSkillAnalysis({
+        occupation,
+        yearsExperience: Number(yearsExperience) || 3,
+        experience: experience || `${occupation} with ${yearsExperience} years practical work experience.`,
+        tasks: Array.isArray(tasks) ? tasks : [],
+        tools: Array.isArray(tools) ? tools : [],
+        skills: Array.isArray(skills) ? skills : [],
+        additionalExperience,
+        rplApplicationId: applicationId,
+        workerProfileId: workerProfile.id
+      });
+
+      // Update application status to ASSESSMENT_READY and save AI snapshot in formData
+      const currentFormData: any = existingApp.formData || {};
+      const updatedFormData = {
+        ...currentFormData,
+        aiAnalysisId: analysisResult.recordId,
+        aiAnalysisSnapshot: {
+          summary: `Potential skill match analysis for ${analysisResult.potentialOccupation || occupation}`,
+          strengths: analysisResult.skills.map((s) => s.name),
+          recommendations: analysisResult.assessmentAreas,
+          potentialSkillMatches: analysisResult.skills.map((s) => `${s.name} (${s.confidence} confidence - ${s.reason})`),
+          suggestedCompetencyAreas: analysisResult.assessmentAreas,
+          suggestedEvidence: analysisResult.suggestedEvidence,
+          areasRequiringVerification: analysisResult.verificationRequired,
+          createdAt: new Date().toISOString()
+        }
+      };
+
+      await prisma.rPLApplication.update({
+        where: { id: applicationId },
+        data: {
+          status: 'ASSESSMENT_READY',
+          currentStep: 5,
+          formData: updatedFormData
+        }
+      });
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        data: analysisResult,
+        recordId: analysisResult.recordId
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Worker Skill Analysis Error]', err);
+      const status = err.status || 500;
+      sendJsonResponse(res, status, {
+        success: false,
+        error: err.message || 'AI skill analysis failed. Please verify internet connectivity.',
+        code: err.code || 'AI_ANALYSIS_FAILED'
+      });
+      return true;
+    }
+  }
+
   return false;
 }
 

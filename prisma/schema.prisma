@@ -22,7 +22,11 @@ enum UserRole {
 
 enum ApplicationStatus {
   DRAFT
+  SELF_DECLARATION_COMPLETED
+  ASSESSMENT_READY
   SUBMITTED
+  UNDER_ASSESSMENT
+  COMPLETED
   UNDER_ASSESSOR_REVIEW
   ASSESSMENT_SCHEDULED
   COMPETENT_CERTIFIED
@@ -314,6 +318,9 @@ model RPLApplication {
   qualificationPackId String?
   qualificationPack   QualificationPack? @relation(fields: [qualificationPackId], references: [id], onDelete: SetNull)
   status              ApplicationStatus  @default(DRAFT)
+  tradeTitle          String?
+  currentStep         Int                @default(1)
+  formData            Json?
   submittedAt         DateTime?
   completedAt         DateTime?
   createdAt           DateTime           @default(now())
@@ -322,8 +329,43 @@ model RPLApplication {
   assessments         Assessment[]
   aiAnalyses          AIAnalysis[]
   competencyResults   CompetencyResult[]
+  experiences         RPLApplicationExperience[]
+  skills              RPLApplicationSkill[]
 
   @@map("rpl_applications")
+}
+
+model RPLApplicationExperience {
+  id               String         @id @default(uuid())
+  rplApplicationId String
+  rplApplication   RPLApplication @relation(fields: [rplApplicationId], references: [id], onDelete: Cascade)
+  company          String
+  role             String
+  startDate        String
+  endDate          String?
+  isCurrent        Boolean        @default(false)
+  responsibilities String?
+  tasksPerformed   String?
+  toolsUsed        String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@map("rpl_application_experiences")
+}
+
+model RPLApplicationSkill {
+  id               String         @id @default(uuid())
+  rplApplicationId String
+  rplApplication   RPLApplication @relation(fields: [rplApplicationId], references: [id], onDelete: Cascade)
+  taskName         String
+  experienceText   String
+  toolsUsed        String
+  confidenceLevel  String
+  statusLabel      String         @default("Self-declared — pending assessment")
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@map("rpl_application_skills")
 }
 
 // ==========================================

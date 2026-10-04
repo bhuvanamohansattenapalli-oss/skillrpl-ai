@@ -8,10 +8,12 @@ import {
   LogIn,
   LogOut,
   UserCheck,
-  Award
+  Award,
+  WifiOff
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
+import { useOnlineStatus } from '../../lib/offline/draft-storage';
 
 interface TopHeaderProps {
   onToggleSidebar: () => void;
@@ -25,6 +27,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({ onToggleSidebar }) => {
     setCurrentView
   } = useApp();
   const { role, profile, signOut } = useAuth();
+  const isOnline = useOnlineStatus();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(false);
@@ -233,6 +236,46 @@ export const TopHeader: React.FC<TopHeaderProps> = ({ onToggleSidebar }) => {
             </button>
           </div>
         )}
+
+        {/* Online / Offline Status Indicator */}
+        <div
+          title={isOnline ? 'Online: Cloud synchronization active' : 'Offline Mode: Changes saved to local storage draft'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '6px 12px',
+            borderRadius: '9999px',
+            background: isOnline ? 'rgba(236, 253, 245, 0.9)' : 'rgba(254, 243, 199, 0.95)',
+            border: `1px solid ${isOnline ? 'rgba(52, 211, 153, 0.4)' : 'rgba(245, 158, 11, 0.5)'}`,
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+            fontSize: '12px',
+            fontWeight: 700,
+            color: isOnline ? '#065f46' : '#92400e',
+            cursor: 'default',
+            userSelect: 'none'
+          }}
+        >
+          {isOnline ? (
+            <>
+              <span
+                style={{
+                  width: '7px',
+                  height: '7px',
+                  borderRadius: '50%',
+                  background: '#10b981',
+                  boxShadow: '0 0 6px #10b981'
+                }}
+              />
+              <span style={{ letterSpacing: '0.02em' }}>Online</span>
+            </>
+          ) : (
+            <>
+              <WifiOff size={13} strokeWidth={2.5} color="#b45309" />
+              <span style={{ letterSpacing: '0.02em' }}>Offline Draft</span>
+            </>
+          )}
+        </div>
 
         {/* Dark Theme Capsule Toggle */}
         <button

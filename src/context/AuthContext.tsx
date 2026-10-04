@@ -11,6 +11,7 @@ export interface UserProfileData {
   role: UserRoleType;
   phone?: string;
   trade?: string;
+  location?: string;
   bio?: string;
   organization?: string;
   specialization?: string;

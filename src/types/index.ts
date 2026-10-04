@@ -213,3 +213,90 @@ export interface NotificationItem {
   type: 'info' | 'success' | 'warning' | 'review';
   read: boolean;
 }
+
+// ==========================================
+// REAL WORKER RPL APPLICATION WORKFLOW TYPES
+// ==========================================
+
+export type RPLApplicationStatus =
+  | 'DRAFT'
+  | 'SELF_DECLARATION_COMPLETED'
+  | 'ASSESSMENT_READY'
+  | 'SUBMITTED'
+  | 'UNDER_ASSESSMENT'
+  | 'COMPLETED';
+
+export interface WorkerExperienceEntry {
+  id?: string;
+  company: string;
+  role: string;
+  startDate: string;
+  endDate: string;
+  isCurrent: boolean;
+  responsibilities: string;
+  tasksPerformed: string;
+  toolsUsed: string;
+}
+
+export interface SelfDeclaredSkillEntry {
+  id?: string;
+  taskName: string;
+  experienceText: string;
+  toolsUsed: string;
+  confidenceLevel: 'Beginner' | 'Intermediate' | 'Advanced';
+  statusLabel?: string; // "Self-declared — pending assessment"
+}
+
+export interface RPLApplicationFormData {
+  // Step 1: Profile / Personal Information
+  name: string;
+  location: string;
+  trade: string;
+  yearsOfExperience: number;
+  phone?: string;
+  email?: string;
+  preferredLanguage?: string;
+
+  // Step 2: Self Declaration
+  workplaceType: string;
+  employmentType: 'Employment' | 'Self-employed' | 'Both' | 'Contract';
+  workEnvironments: string[];
+  safetyPracticeAgreement: boolean;
+
+  // Step 3: Experience Details (Multiple entries)
+  experiences: WorkerExperienceEntry[];
+
+  // Step 4: Skills & Tasks (Self-declared)
+  skills: SelfDeclaredSkillEntry[];
+
+  // Step 5: AI Analysis results snapshot
+  aiAnalysisId?: string;
+  aiAnalysisSnapshot?: {
+    summary?: string;
+    strengths?: string[];
+    recommendations?: string[];
+    potentialSkillMatches?: string[];
+    suggestedCompetencyAreas?: string[];
+    suggestedEvidence?: string[];
+    areasRequiringVerification?: string[];
+    model?: string;
+    createdAt?: string;
+  };
+
+  // Step 6: Evidence (marked "Next step")
+  evidenceNote?: string;
+}
+
+export interface RPLApplicationListItem {
+  id: string;
+  applicationNumber: string;
+  tradeTitle: string;
+  status: RPLApplicationStatus;
+  currentStep: number;
+  progressPercentage: number;
+  createdAt: string;
+  updatedAt: string;
+  submittedAt?: string;
+  completedAt?: string;
+}
+
