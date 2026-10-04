@@ -431,6 +431,29 @@ export const AiAssistantPage: React.FC = () => {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => setCurrentView('ai-analysis')}
+                title="Open AI Skill Analysis Engine"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  color: '#0284c7',
+                  background: 'rgba(56, 189, 248, 0.12)',
+                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                  padding: '5px 11px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Cpu size={13} />
+                <span>AI Skill Analysis</span>
+              </button>
+
               {messages.length > 0 && (
                 <button
                   type="button"

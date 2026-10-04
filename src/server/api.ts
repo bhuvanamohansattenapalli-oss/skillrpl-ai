@@ -1,7 +1,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { generateRplChatResponse } from '../lib/ai/rpl-assistant.ts';
 import { isGeminiConfigured, getGeminiModel } from '../lib/ai/gemini.ts';
-import { chatRequestSchema, type ChatApiResponse, type HealthResponse } from '../lib/ai/types.ts';
+import { chatRequestSchema, skillAnalysisRequestSchema, type ChatApiResponse, type HealthResponse } from '../lib/ai/types.ts';
+import { performSkillAnalysis } from '../lib/ai/skill-analysis.ts';
+
 
 /**
  * Utility to send JSON responses with appropriate headers
@@ -247,6 +249,87 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
   }
 
+  // 4. Skill Analysis endpoint: POST /api/ai/skill-analysis
+  if (pathname === '/api/ai/skill-analysis') {
+    if (req.method !== 'POST') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use POST.' });
+      return true;
+    }
+
+    try {
+      // Rate limit check (15 RPM protection)
+      if (!checkRateLimit()) {
+        console.warn(`[Skill Analysis Rate Limiter] 15 RPM limit reached. Returning 429.`);
+        sendJsonResponse(res, 429, {
+          success: false,
+          status: 429,
+          code: 'RATE_LIMIT_EXCEEDED',
+          error: 'AI request limit reached. Please wait a moment and try again.'
+        });
+        return true;
+      }
+
+      const rawBody = await parseRequestBody(req);
+
+      // Validate with Zod
+      const parseResult = skillAnalysisRequestSchema.safeParse(rawBody);
+
+      if (!parseResult.success) {
+        const firstIssue = parseResult.error.issues[0];
+        const errorMessage = firstIssue
+          ? `${firstIssue.path.join('.') || 'request'}: ${firstIssue.message}`
+          : 'Invalid request format.';
+
+        sendJsonResponse(res, 400, {
+          success: false,
+          status: 400,
+          code: 'INVALID_REQUEST',
+          error: errorMessage
+        });
+        return true;
+      }
+
+      // Check if Gemini is configured
+      if (!isGeminiConfigured()) {
+        sendJsonResponse(res, 503, {
+          success: false,
+          status: 503,
+          code: 'SERVICE_UNAVAILABLE',
+          error: 'AI Assistant service is not configured. Please ensure GEMINI_API_KEY is set.'
+        });
+        return true;
+      }
+
+      // Execute AI Skill Analysis using dedicated Gemini 3.6 Flash service
+      const analysisResult = await performSkillAnalysis(parseResult.data);
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        data: analysisResult,
+        recordId: analysisResult.recordId
+      });
+      return true;
+    } catch (err: any) {
+      const statusCode = err?.status || 500;
+      const errorCode = err?.code || 'ANALYSIS_ERROR';
+      const errorMessage =
+        err instanceof Error ? err.message : 'AI Skill Analysis is temporarily unavailable. Please try again.';
+
+      console.error(
+        `[Skill Analysis Error] Status: ${statusCode} | Code: ${errorCode} | Model: ${getGeminiModel()} | KeyConfigured: ${isGeminiConfigured()} | Message: ${errorMessage}`
+      );
+
+      sendJsonResponse(res, statusCode, {
+        success: false,
+        status: statusCode,
+        code: errorCode,
+        error: errorMessage
+      });
+      return true;
+    }
+  }
+
   return false;
 }
+
 

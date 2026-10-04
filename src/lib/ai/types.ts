@@ -49,3 +49,21 @@ export interface HealthResponse {
   geminiConfigured: boolean;
   model?: string;
 }
+
+/**
+ * Zod schema for validating POST /api/ai/skill-analysis requests
+ */
+export const skillAnalysisRequestSchema = z.object({
+  occupation: z.string().trim().min(1, 'Occupation or trade is required'),
+  yearsExperience: z.coerce.number().min(0, 'Years of experience must be 0 or more').max(60, 'Years of experience must be reasonable'),
+  experience: z.string().trim().min(10, 'Please provide more details about your work experience (at least 10 characters)'),
+  tasks: z.array(z.string().trim().min(1)).optional().default([]),
+  tools: z.array(z.string().trim().min(1)).optional().default([]),
+  skills: z.array(z.string().trim().min(1)).optional().default([]),
+  additionalExperience: z.string().trim().optional(),
+  workerProfileId: z.string().optional(),
+  rplApplicationId: z.string().optional()
+});
+
+export type SkillAnalysisRequest = z.infer<typeof skillAnalysisRequestSchema>;
+

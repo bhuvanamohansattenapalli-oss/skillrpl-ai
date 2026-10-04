@@ -55,49 +55,56 @@ export async function generateRplChatResponse(request: ChatRequest): Promise<Cha
     parts: [{ text: request.message.trim() }]
   });
 
-  // Attempt generation with retry for transient 503 spikes
+  const primaryModel = model;
+  const modelsToTry = [primaryModel, 'gemini-3.5-flash', 'gemini-flash-latest'].filter(
+    (m, idx, arr) => arr.indexOf(m) === idx
+  );
+
   let lastError: any = null;
-  const maxAttempts = 3;
+  let replyText: string | undefined;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        contents,
-        config: {
-          systemInstruction: RPL_SYSTEM_INSTRUCTION,
-          temperature: 0.65,
-          maxOutputTokens: 2048
+  for (const currentModel of modelsToTry) {
+    const maxAttempts = currentModel === primaryModel ? 2 : 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model: currentModel,
+          contents,
+          config: {
+            systemInstruction: RPL_SYSTEM_INSTRUCTION,
+            temperature: 0.65,
+            maxOutputTokens: 2048
+          }
+        });
+
+        replyText = response.text?.trim();
+        if (replyText) {
+          break;
         }
-      });
+      } catch (error: any) {
+        lastError = error;
+        const errMsg = error?.message || String(error);
+        const isQuotaExceeded = errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota exceeded');
+        const isTransient = errMsg.includes('503') || errMsg.includes('UNAVAILABLE') || errMsg.includes('high demand');
 
-      const replyText = response.text?.trim();
+        if (isQuotaExceeded) {
+          break;
+        }
 
-      if (!replyText) {
-        throw new Error('Empty response received from Gemini model.');
+        if (isTransient && attempt < maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, attempt * 1000 + 200));
+          continue;
+        }
+
+        break;
       }
+    }
 
+    if (replyText) {
       return {
         success: true,
         message: replyText
       };
-    } catch (error: any) {
-      lastError = error;
-      const errorMessage = error?.message || String(error);
-
-      // Only retry on transient 503 / high demand / unavailable spikes
-      const isTransientSpike =
-        errorMessage.includes('503') ||
-        errorMessage.includes('UNAVAILABLE') ||
-        errorMessage.includes('high demand');
-
-      if (isTransientSpike && attempt < maxAttempts) {
-        // Wait briefly before retrying (1.2s on attempt 1, 2s on attempt 2)
-        await new Promise((resolve) => setTimeout(resolve, attempt * 1000 + 200));
-        continue;
-      }
-
-      break;
     }
   }
 

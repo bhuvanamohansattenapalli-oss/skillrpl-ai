@@ -12,7 +12,8 @@ import {
   ShieldCheck,
   Settings,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  Cpu
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { IndiaMapGraphic } from '../common/IndiaMapGraphic';
@@ -44,6 +45,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
     if (key === 'profile') return currentView === 'profile';
     if (key === 'experience') return currentView === 'experience' || currentView === 'experience-detail';
     if (key === 'ai-assistant') return currentView === 'ai-assistant';
+    if (key === 'ai-analysis') return currentView === 'ai-analysis';
     if (key === 'skill-assessment') return currentView === 'assessment';
     if (key === 'my-assessments') return currentView === 'declaration' || currentView === 'evidence';
     if (key === 'certification') return currentView === 'results';
@@ -233,6 +235,31 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
               }}
             >
               RPL AI
+            </span>
+          </span>
+        </button>
+
+        {/* 2.3 AI Skill Analysis */}
+        <button
+          onClick={() => navigateTo('ai-analysis')}
+          style={navItemStyle(isItemActive('ai-analysis'))}
+          className="sidebar-btn"
+        >
+          <Cpu size={18} color={isItemActive('ai-analysis') ? '#FFFFFF' : '#38bdf8'} />
+          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <span>Skill Analysis</span>
+            <span
+              style={{
+                fontSize: '10px',
+                fontWeight: 700,
+                color: isItemActive('ai-analysis') ? '#FFFFFF' : '#0284c7',
+                background: isItemActive('ai-analysis') ? 'rgba(255, 255, 255, 0.2)' : 'rgba(56, 189, 248, 0.15)',
+                border: isItemActive('ai-analysis') ? '1px solid rgba(255, 255, 255, 0.35)' : '1px solid rgba(56, 189, 248, 0.3)',
+                padding: '1px 6px',
+                borderRadius: '6px'
+              }}
+            >
+              CORE AI
             </span>
           </span>
         </button>

@@ -354,17 +354,25 @@ model AIMessage {
 }
 
 model AIAnalysis {
-  id                   String         @id @default(uuid())
-  rplApplicationId     String
-  rplApplication       RPLApplication @relation(fields: [rplApplicationId], references: [id], onDelete: Cascade)
-  analysisType         String
-  summary              String
-  strengths            String[]       @default([])
-  recommendations      String[]       @default([])
+  id                   String          @id @default(uuid())
+  rplApplicationId     String?
+  rplApplication       RPLApplication? @relation(fields: [rplApplicationId], references: [id], onDelete: SetNull)
+  analysisType         String          @default("SKILL_ANALYSIS")
+  summary              String?
+  strengths            String[]        @default([])
+  recommendations      String[]        @default([])
   potentialNsqfLevel   Int?
   confidenceScore      Float?
-  isOfficialAssessment Boolean        @default(false)
-  createdAt            DateTime       @default(now())
+  isOfficialAssessment Boolean         @default(false)
+
+  // Full Analysis Snapshots
+  inputSnapshot        Json?
+  result               Json?
+  model                String?         @default("gemini-3.6-flash")
+  type                 String?         @default("SKILL_ANALYSIS")
+  status               String?         @default("COMPLETED")
+
+  createdAt            DateTime        @default(now())
 
   @@map("ai_analyses")
 }
