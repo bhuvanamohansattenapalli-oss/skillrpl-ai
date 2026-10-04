@@ -243,8 +243,9 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         success: false,
         status: statusCode,
         code: errorCode,
+        model: getGeminiModel(),
         error: errorMessage
-      } as ChatApiResponse & { status?: number; code?: string });
+      } as ChatApiResponse & { status?: number; code?: string; model?: string });
       return true;
     }
   }

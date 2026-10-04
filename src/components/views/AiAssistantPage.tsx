@@ -169,16 +169,26 @@ export const AiAssistantPage: React.FC = () => {
         setMessages((prev) => [...prev, aiMsg]);
       } else {
         const statusCode = data?.status || response.status;
+        const errorCode = data?.code;
+        const modelName = data?.model || 'gemini-3.6-flash';
         let errorMessage = data?.error;
 
-        if (statusCode === 429) {
-          errorMessage = 'AI request limit reached. Please wait a moment and try again.';
-        } else if (statusCode === 401 || statusCode === 403) {
-          errorMessage = 'AI service authentication failed. Please check the server configuration.';
-        } else if (statusCode === 404) {
-          errorMessage = 'Configured AI model is currently unavailable.';
-        } else if (!errorMessage) {
-          errorMessage = 'AI Assistant is temporarily unavailable. Please try again.';
+        if (errorMessage) {
+          // Preserve specific diagnostic error returned from server
+          if (errorCode && !errorMessage.includes(errorCode)) {
+            errorMessage = `[${errorCode}] ${errorMessage}`;
+          }
+        } else {
+          // Fallback only when response body has no diagnostic error
+          if (statusCode === 429) {
+            errorMessage = `[HTTP 429 - RATE_LIMIT_EXCEEDED] AI request quota exceeded for '${modelName}'. Please wait before retrying.`;
+          } else if (statusCode === 401 || statusCode === 403) {
+            errorMessage = `[HTTP ${statusCode} - AUTH_FAILED] AI service authentication failed. Verify GEMINI_API_KEY in deployment environment.`;
+          } else if (statusCode === 404) {
+            errorMessage = `[HTTP 404 - NOT_FOUND] API route or model '${modelName}' not found. Check deployment API routing and GEMINI_MODEL.`;
+          } else {
+            errorMessage = `[HTTP ${statusCode}] AI Assistant is temporarily unavailable. Please try again.`;
+          }
         }
 
         const aiMsg: ChatMessage = {
