@@ -1,5 +1,6 @@
 import { getGeminiClient, getGeminiModel } from './gemini.ts';
 import { prisma } from '../db.ts';
+import type { Prisma } from '@prisma/client';
 
 export interface SkillItem {
   name: string;
@@ -240,8 +241,8 @@ Provide a comprehensive, objective RPL diagnostic analysis strictly formatted in
         potentialNsqfLevel: null,
         confidenceScore: Number(confidenceRatio.toFixed(2)),
         isOfficialAssessment: false,
-        inputSnapshot: input as any,
-        result: analysisResult as any,
+        inputSnapshot: JSON.parse(JSON.stringify(input)) as Prisma.InputJsonValue,
+        result: JSON.parse(JSON.stringify(analysisResult)) as Prisma.InputJsonValue,
         model: modelUsed,
         type: 'SKILL_ANALYSIS',
         status: 'COMPLETED'

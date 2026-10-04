@@ -36,9 +36,30 @@ export async function verifySupabaseToken(token: string) {
 export async function syncUserProfile(data: SyncProfileData) {
   const { email, role, name, phone, trade, organization, location } = data;
 
+  if (!email || typeof email !== 'string' || !email.trim()) {
+    throw new Error('Valid email address is required for user synchronization.');
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+  const guaranteedName = (typeof name === 'string' && name.trim().length > 0)
+    ? name.trim()
+    : (role === 'ASSESSOR' ? 'Accredited Assessor' : 'Worker Candidate');
+  const guaranteedPhone = (typeof phone === 'string' && phone.trim().length > 0)
+    ? phone.trim()
+    : 'Not Provided';
+  const guaranteedTrade = (typeof trade === 'string' && trade.trim().length > 0)
+    ? trade.trim()
+    : (role === 'ASSESSOR' ? 'Technical Trades & Electrical Assessment' : 'General Technical');
+  const guaranteedLocation = (typeof location === 'string' && location.trim().length > 0)
+    ? location.trim()
+    : 'Not Specified';
+  const guaranteedOrganization = (typeof organization === 'string' && organization.trim().length > 0)
+    ? organization.trim()
+    : 'Accredited Sector Skill Council';
+
   // 1. Find or create the User record
   let user = await prisma.user.findFirst({
-    where: { email: email.toLowerCase().trim() },
+    where: { email: normalizedEmail },
     include: { workerProfile: true, assessorProfile: true }
   });
 
@@ -46,7 +67,7 @@ export async function syncUserProfile(data: SyncProfileData) {
     user = await prisma.user.create({
       data: {
         id: data.userId || undefined,
-        email: email.toLowerCase().trim(),
+        email: normalizedEmail,
         role: role === 'ASSESSOR' ? 'ASSESSOR' : 'WORKER'
       },
       include: { workerProfile: true, assessorProfile: true }
@@ -67,24 +88,24 @@ export async function syncUserProfile(data: SyncProfileData) {
       workerProfile = await prisma.workerProfile.create({
         data: {
           userId: user.id,
-          name: name || 'Worker Candidate',
+          name: guaranteedName,
           email: user.email,
-          phone: phone || undefined,
-          trade: trade || 'General Technical',
-          location: location || undefined,
+          phone: guaranteedPhone,
+          trade: guaranteedTrade,
+          location: guaranteedLocation,
           yearsOfExperience: 3.0,
           profileCompletion: 60,
-          professionalSummary: `RPL Candidate registered for ${trade || 'Technical Trades'} evaluation.`
+          professionalSummary: `RPL Candidate registered for ${guaranteedTrade} evaluation.`
         }
       });
     } else {
       workerProfile = await prisma.workerProfile.update({
         where: { id: workerProfile.id },
         data: {
-          name: name || workerProfile.name,
-          phone: phone !== undefined ? phone : workerProfile.phone,
-          trade: trade || workerProfile.trade,
-          location: location !== undefined ? location : workerProfile.location
+          name: name?.trim() || workerProfile.name,
+          phone: (typeof phone === 'string' && phone.trim().length > 0) ? phone.trim() : workerProfile.phone,
+          trade: trade?.trim() || workerProfile.trade,
+          location: (typeof location === 'string' && location.trim().length > 0) ? location.trim() : workerProfile.location
         }
       });
     }
@@ -104,11 +125,11 @@ export async function syncUserProfile(data: SyncProfileData) {
       assessorProfile = await prisma.assessorProfile.create({
         data: {
           userId: user.id,
-          name: name || 'Accredited Assessor',
+          name: guaranteedName,
           email: user.email,
-          phone: phone || undefined,
-          tradeSpecialization: trade || 'Technical Trades & Electrical Assessment',
-          organization: organization || 'Accredited Sector Skill Council',
+          phone: guaranteedPhone,
+          tradeSpecialization: guaranteedTrade,
+          organization: guaranteedOrganization,
           nsqfCertifiedLevel: 5,
           isAvailable: true
         }
@@ -117,10 +138,10 @@ export async function syncUserProfile(data: SyncProfileData) {
       assessorProfile = await prisma.assessorProfile.update({
         where: { id: assessorProfile.id },
         data: {
-          name: name || assessorProfile.name,
-          phone: phone !== undefined ? phone : assessorProfile.phone,
-          tradeSpecialization: trade || assessorProfile.tradeSpecialization,
-          organization: organization || assessorProfile.organization
+          name: name?.trim() || assessorProfile.name,
+          phone: (typeof phone === 'string' && phone.trim().length > 0) ? phone.trim() : assessorProfile.phone,
+          tradeSpecialization: trade?.trim() || assessorProfile.tradeSpecialization,
+          organization: organization?.trim() || assessorProfile.organization
         }
       });
     }
