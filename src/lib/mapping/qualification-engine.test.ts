@@ -22,10 +22,6 @@ import {
   VERIFIED_QUALIFICATIONS,
   getQualificationByCode
 } from '../../data/qualification-catalog.ts';
-import {
-  runOfflineQualificationMapping,
-  searchOfflineQualifications
-} from '../offline/qualification-storage.ts';
 
 interface TestResult {
   testNumber: number;
