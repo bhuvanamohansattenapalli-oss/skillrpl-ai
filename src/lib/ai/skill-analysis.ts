@@ -232,7 +232,7 @@ Provide a comprehensive, objective RPL diagnostic analysis strictly formatted in
 
     const savedRecord = await prisma.aIAnalysis.create({
       data: {
-        rplApplicationId: input.rplApplicationId || null,
+        rplApplicationId: input.rplApplicationId || undefined,
         analysisType: 'SKILL_ANALYSIS',
         summary: `AI Skill Analysis for ${analysisResult.potentialOccupation || input.occupation} (${input.yearsExperience} yrs)`,
         strengths: analysisResult.skills.map((s) => s.name),

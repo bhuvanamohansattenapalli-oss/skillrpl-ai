@@ -69,9 +69,9 @@ export async function syncUserProfile(data: SyncProfileData) {
           userId: user.id,
           name: name || 'Worker Candidate',
           email: user.email,
-          phone: phone || null,
+          phone: phone || undefined,
           trade: trade || 'General Technical',
-          location: location || null,
+          location: location || undefined,
           yearsOfExperience: 3.0,
           profileCompletion: 60,
           professionalSummary: `RPL Candidate registered for ${trade || 'Technical Trades'} evaluation.`
@@ -84,7 +84,7 @@ export async function syncUserProfile(data: SyncProfileData) {
           name: name || workerProfile.name,
           phone: phone !== undefined ? phone : workerProfile.phone,
           trade: trade || workerProfile.trade,
-          location: location || workerProfile.location
+          location: location !== undefined ? location : workerProfile.location
         }
       });
     }
@@ -106,7 +106,7 @@ export async function syncUserProfile(data: SyncProfileData) {
           userId: user.id,
           name: name || 'Accredited Assessor',
           email: user.email,
-          phone: phone || null,
+          phone: phone || undefined,
           tradeSpecialization: trade || 'Technical Trades & Electrical Assessment',
           organization: organization || 'Accredited Sector Skill Council',
           nsqfCertifiedLevel: 5,

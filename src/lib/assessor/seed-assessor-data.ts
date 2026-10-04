@@ -134,7 +134,7 @@ export async function ensureAssessorDemoData() {
 
     // 6. Link existing AI Skill Analysis to this application if unlinked
     const latestAiAnalysis = await prisma.aIAnalysis.findFirst({
-      where: { rplApplicationId: null },
+      where: { rplApplication: null },
       orderBy: { createdAt: 'desc' }
     });
 
