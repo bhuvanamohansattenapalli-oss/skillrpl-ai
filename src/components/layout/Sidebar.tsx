@@ -195,14 +195,62 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
 
         {/* 1.1 Candidate Reviews for Assessors or My Profile for Workers */}
         {role === 'ASSESSOR' ? (
-          <button
-            onClick={() => navigateTo('assessor-candidate')}
-            style={navItemStyle(currentView === 'assessor-candidate')}
-            className="sidebar-btn"
-          >
-            <Award size={18} color={currentView === 'assessor-candidate' ? '#FFFFFF' : '#fb923c'} />
-            <span>Candidate Review</span>
-          </button>
+          <>
+            <button
+              onClick={() => navigateTo('assessor-candidate')}
+              style={navItemStyle(currentView === 'assessor-candidate')}
+              className="sidebar-btn"
+            >
+              <Award size={18} color={currentView === 'assessor-candidate' ? '#FFFFFF' : '#fb923c'} />
+              <span>Candidate Review</span>
+            </button>
+            <button
+              onClick={() => navigateTo('practical-assessment')}
+              style={navItemStyle(currentView === 'practical-assessment')}
+              className="sidebar-btn"
+            >
+              <ClipboardCheck size={18} color={currentView === 'practical-assessment' ? '#FFFFFF' : '#38bdf8'} />
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <span>Practical Assessment</span>
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    color: currentView === 'practical-assessment' ? '#FFFFFF' : '#0284c7',
+                    background: currentView === 'practical-assessment' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(2, 132, 199, 0.15)',
+                    border: currentView === 'practical-assessment' ? '1px solid rgba(255, 255, 255, 0.35)' : '1px solid rgba(2, 132, 199, 0.3)',
+                    padding: '1px 6px',
+                    borderRadius: '6px'
+                  }}
+                >
+                  LIVE
+                </span>
+              </span>
+            </button>
+            <button
+              onClick={() => navigateTo('assessor-analytics')}
+              style={navItemStyle(currentView === 'assessor-analytics')}
+              className="sidebar-btn"
+            >
+              <BarChart3 size={18} color={currentView === 'assessor-analytics' ? '#FFFFFF' : '#2dd4bf'} />
+              <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <span>Analytics & Auditing</span>
+                <span
+                  style={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    color: currentView === 'assessor-analytics' ? '#FFFFFF' : '#0d9488',
+                    background: currentView === 'assessor-analytics' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(13, 148, 136, 0.15)',
+                    border: currentView === 'assessor-analytics' ? '1px solid rgba(255, 255, 255, 0.35)' : '1px solid rgba(13, 148, 136, 0.3)',
+                    padding: '1px 6px',
+                    borderRadius: '6px'
+                  }}
+                >
+                  SIH
+                </span>
+              </span>
+            </button>
+          </>
         ) : (
           <button
             onClick={() => navigateTo('profile')}

@@ -12,6 +12,8 @@ export type AppView =
   | 'ai-analysis'
   | 'qualification-match'
   | 'assessment'
+  | 'practical-assessment'
+  | 'assessor-analytics'
   | 'results'
   | 'assessor-dashboard'
   | 'assessor-candidate'

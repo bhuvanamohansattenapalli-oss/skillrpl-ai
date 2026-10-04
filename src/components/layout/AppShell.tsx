@@ -24,6 +24,8 @@ import { QualificationMatchPage } from '../views/QualificationMatchPage';
 import { AssessmentPage } from '../views/AssessmentPage';
 import { AssessorDashboard } from '../views/AssessorDashboard';
 import { AssessorCandidateView } from '../views/AssessorCandidateView';
+import { PracticalAssessmentView } from '../views/PracticalAssessmentView';
+import { AssessorAnalyticsView } from '../views/AssessorAnalyticsView';
 import { ResultPage } from '../views/ResultPage';
 import { SettingsPage } from '../views/SettingsPage';
 import { LoginPage } from '../views/LoginPage';
@@ -111,7 +113,7 @@ export const AppShell: React.FC = () => {
     }
 
     // Role-based protection: Worker attempting to access assessor views
-    if (role === 'WORKER' && (currentView === 'assessor-dashboard' || currentView === 'assessor-candidate')) {
+    if (role === 'WORKER' && (currentView === 'assessor-dashboard' || currentView === 'assessor-candidate' || currentView === 'practical-assessment' || currentView === 'assessor-analytics')) {
       return (
         <div style={{ maxWidth: '580px', margin: '60px auto', textAlign: 'center' }}>
           <div 
@@ -180,6 +182,10 @@ export const AppShell: React.FC = () => {
         return <QualificationMatchPage />;
       case 'assessment':
         return <AssessmentPage />;
+      case 'practical-assessment':
+        return <PracticalAssessmentView />;
+      case 'assessor-analytics':
+        return <AssessorAnalyticsView />;
       case 'results':
         return <ResultPage />;
       case 'assessor-dashboard':

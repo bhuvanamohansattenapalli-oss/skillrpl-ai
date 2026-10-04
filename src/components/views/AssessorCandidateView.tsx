@@ -254,6 +254,17 @@ export const AssessorCandidateView: React.FC = () => {
               Supabase PostgreSQL Synced
             </GlassBadge>
           )}
+          <GlassButton
+            size="sm"
+            variant="primary"
+            icon={<Award size={14} />}
+            onClick={() => {
+              setCurrentView('practical-assessment');
+              showToast('Launched Live Practical Assessment workspace.', 'info');
+            }}
+          >
+            Live Practical Exam
+          </GlassButton>
         </div>
       </div>
 

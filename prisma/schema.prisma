@@ -45,6 +45,9 @@ enum EvidenceType {
 enum AssessmentStatus {
   SCHEDULED
   IN_PROGRESS
+  SUBMITTED
+  ASSESSED
+  FINALIZED
   COMPLETED
   CANCELLED
 }
@@ -52,6 +55,7 @@ enum AssessmentStatus {
 enum CompetencyOutcome {
   COMPETENT
   NOT_YET_COMPETENT
+  REASSESSMENT_REQUIRED
 }
 
 enum MessageRole {
@@ -188,6 +192,7 @@ model QualificationPack {
   qualificationMappings QualificationMapping[]
   rplApplications       RPLApplication[]
   assessmentCriteria    AssessmentCriterion[]
+  assessments           Assessment[]
 
   @@map("qualification_packs")
 }
@@ -509,21 +514,42 @@ model AIAnalysis {
 // ==========================================
 
 model Assessment {
-  id                String            @id @default(uuid())
-  rplApplicationId  String
-  rplApplication    RPLApplication    @relation(fields: [rplApplicationId], references: [id], onDelete: Cascade)
-  assessorProfileId String
-  assessorProfile   AssessorProfile   @relation(fields: [assessorProfileId], references: [id], onDelete: Cascade)
-  scheduledDate     DateTime?
-  status            AssessmentStatus  @default(SCHEDULED)
-  notes             String?
-  practicalTaskDemo String?
-  conductedAt       DateTime?
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
+  id                    String              @id @default(uuid())
+  sessionNumber         String?             @unique
+  rplApplicationId      String
+  rplApplication        RPLApplication      @relation(fields: [rplApplicationId], references: [id], onDelete: Cascade)
+  assessorProfileId     String
+  assessorProfile       AssessorProfile     @relation(fields: [assessorProfileId], references: [id], onDelete: Cascade)
+  qualificationPackId   String?
+  qualificationPack     QualificationPack?  @relation(fields: [qualificationPackId], references: [id], onDelete: SetNull)
+  scheduledDate         DateTime?
+  status                AssessmentStatus    @default(SCHEDULED)
+  notes                 String?
+  practicalTaskDemo     String?
+  conductedAt           DateTime?
+  completedAt           DateTime?
 
-  scores            AssessmentScore[]
-  competencyResults CompetencyResult[]
+  // Phase 4 Dynamic Task Bank & Rubric Assessment Fields
+  tasksSnapshot         Json?               // Exact generated/selected task set for auditability & reproducibility
+  evidenceReviewed      Json?               // [{ evidenceId, title, verified, remarks }]
+  aiAssistanceSummary   Json?               // { notesSummary, missingObservations, criteriaChecklist, consistencyAnalysis, suggestedEvidence }
+  systemReferenceScore  Float?              // Calculated score percentage (0 - 100)
+  systemReferenceOutcome String?            // "COMPETENT" | "NOT_YET_COMPETENT" (System reference threshold only)
+  finalDecision         CompetencyOutcome?  // Official Human Assessor Decision: COMPETENT | NOT_YET_COMPETENT | REASSESSMENT_REQUIRED
+  decisionReason        String?             // Mandatory explanation if human decision differs from system reference
+  assessorConfirmed     Boolean             @default(false)
+  assessorConfirmedAt   DateTime?
+  assessorSignature     String?
+  interAssessorGroup    String?             // Identifier for comparative inter-assessor consistency tests
+  syncedAt              DateTime?
+  localDraftVersion     Int                 @default(1)
+
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  scores                AssessmentScore[]
+  competencyResults     CompetencyResult[]
+  auditLogs             AssessmentAuditLog[]
 
   @@map("assessments")
 }
@@ -543,15 +569,43 @@ model AssessmentCriterion {
 }
 
 model AssessmentScore {
-  id           String              @id @default(uuid())
-  assessmentId String
-  assessment   Assessment          @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
-  criterionId  String
-  criterion    AssessmentCriterion @relation(fields: [criterionId], references: [id], onDelete: Cascade)
-  scoreAwarded Float
-  remarks      String?
+  id            String               @id @default(uuid())
+  assessmentId  String
+  assessment    Assessment           @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  criterionId   String?
+  criterion     AssessmentCriterion? @relation(fields: [criterionId], references: [id], onDelete: SetNull)
+  taskId        String?
+  taskTitle     String?
+  competencyArea String?
+  criterionKey  String?
+  criterionText String?
+  scoreAwarded  Float                // 0 to 4 standardized rubric score
+  rubricLevel   String?              // "Not Demonstrated" | "Needs Significant Support" | "Partially Demonstrated" | "Competent" | "Strongly Demonstrated"
+  observation   String?              // Mandatory for score 0 or 1
+  remarks       String?
+  isMandatory   Boolean              @default(true)
+  evaluatedAt   DateTime             @default(now())
+
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @default(now()) @updatedAt
 
   @@map("assessment_scores")
+}
+
+model AssessmentAuditLog {
+  id              String      @id @default(uuid())
+  assessmentId    String
+  assessment      Assessment  @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  action          String      // "ASSESSMENT_CREATED" | "TASK_STARTED" | "CRITERION_SCORED" | "SCORE_CHANGED" | "EVIDENCE_REVIEWED" | "AI_ASSISTANCE_REQUESTED" | "ASSESSMENT_SUBMITTED" | "ASSESSMENT_FINALIZED"
+  performedById   String?
+  performedByRole String?     @default("ASSESSOR")
+  details         String?
+  previousValue   Json?
+  newValue        Json?
+  timestamp       DateTime    @default(now())
+
+  @@index([assessmentId])
+  @@map("assessment_audit_logs")
 }
 
 model CompetencyResult {

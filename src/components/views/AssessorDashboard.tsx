@@ -8,7 +8,6 @@ import {
   ShieldCheck,
   FileCheck,
   Award,
-  ChevronRight,
   Inbox
 } from 'lucide-react';
 import { GlassCard } from '../common/GlassCard';
@@ -135,16 +134,19 @@ export const AssessorDashboard: React.FC = () => {
           <GlassButton
             variant="secondary"
             icon={<FileCheck size={16} />}
-            onClick={() => showToast('Exporting assessment batch summary...', 'info')}
+            onClick={() => setCurrentView('assessor-analytics')}
           >
-            Export Batch Audit
+            Inter-Assessor Analytics
           </GlassButton>
           <GlassButton
             variant="primary"
             icon={<Award size={16} />}
-            onClick={() => handleEvaluate('cand-001')}
+            onClick={() => {
+              setSelectedCandidateId('cand-001');
+              setCurrentView('practical-assessment');
+            }}
           >
-            Assess Next Candidate
+            Practical Assessment (Live Rubric)
           </GlassButton>
         </div>
       </div>
@@ -462,15 +464,26 @@ export const AssessorDashboard: React.FC = () => {
 
                   {/* Action */}
                   <td style={{ padding: '14px 16px', textAlign: 'right', borderRadius: '0 12px 12px 0' }}>
-                    <GlassButton
-                      size="sm"
-                      variant="primary"
-                      onClick={() => handleEvaluate(candidate.id)}
-                      icon={<ChevronRight size={14} />}
-                      iconPosition="right"
-                    >
-                      Evaluate
-                    </GlassButton>
+                    <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                      <GlassButton
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => handleEvaluate(candidate.id)}
+                      >
+                        Portfolio
+                      </GlassButton>
+                      <GlassButton
+                        size="sm"
+                        variant="primary"
+                        onClick={() => {
+                          setSelectedCandidateId(candidate.id);
+                          setCurrentView('practical-assessment');
+                        }}
+                        icon={<Award size={13} />}
+                      >
+                        Live Practical
+                      </GlassButton>
+                    </div>
                   </td>
                 </tr>
               ))}

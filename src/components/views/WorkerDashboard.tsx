@@ -824,6 +824,31 @@ export const WorkerDashboard: React.FC = () => {
                           <ChevronRight size={14} />
                         </button>
 
+                        {(app.status === 'COMPLETED' || app.status === 'UNDER_ASSESSMENT') && (
+                          <button
+                            onClick={() => {
+                              setActiveApplicationId(app.id);
+                              setCurrentView('results');
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '6px 14px',
+                              borderRadius: '8px',
+                              border: '1px solid rgba(124, 58, 237, 0.4)',
+                              background: 'rgba(124, 58, 237, 0.08)',
+                              color: '#7c3aed',
+                              fontSize: '12.5px',
+                              fontWeight: 700,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <Award size={13} />
+                            <span>{app.status === 'COMPLETED' ? 'View Certificate' : 'Assessment Status'}</span>
+                          </button>
+                        )}
+
                         {isSubmissible && (
                           <button
                             onClick={() => handleSubmitApplication(app.id)}
