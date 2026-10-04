@@ -1,0 +1,16 @@
+/* App-level utility styles */
+.table-row-hover:hover {
+  background: rgba(223, 242, 255, 0.45) !important;
+  box-shadow: 0 2px 8px rgba(77, 163, 217, 0.12) !important;
+}
+
+.active-indicator {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 20px;
+  background: var(--color-accent-teal);
+  border-radius: 0 4px 4px 0;
+}
