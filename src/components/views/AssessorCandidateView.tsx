@@ -15,6 +15,10 @@ import {
 import { GlassCard } from '../common/GlassCard';
 import { GlassButton } from '../common/GlassButton';
 import { GlassBadge } from '../common/GlassBadge';
+import { QualificationMatchCard } from '../common/QualificationMatchCard';
+import { getAllVerifiedQualifications } from '../../data/qualification-catalog';
+import { submitAssessorMappingReview } from '../../lib/api/qualification-mapping';
+import { performDeterministicMatch } from '../../lib/mapping/qualification-engine';
 import { useApp } from '../../context/AppContext';
 
 export const AssessorCandidateView: React.FC = () => {
@@ -28,18 +32,29 @@ export const AssessorCandidateView: React.FC = () => {
     showToast
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'criteria' | 'evidence' | 'declaration' | 'ai-insights'>('criteria');
+  const [activeTab, setActiveTab] = useState<'criteria' | 'evidence' | 'declaration' | 'ai-insights' | 'mapping-review'>('criteria');
 
-  // Supabase State
+  // Supabase & Mapping State
   const [supabaseAppId, setSupabaseAppId] = useState<string | null>(null);
   const [supabaseAssessmentId, setSupabaseAssessmentId] = useState<string | null>(null);
   const [aiAnalysisData, setAiAnalysisData] = useState<any | null>(null);
+  const [candidateMappings, setCandidateMappings] = useState<any[]>([]);
+  const [mappingStatus, setMappingStatus] = useState<string>('SUGGESTED');
+  const [selectedMappingQp, setSelectedMappingQp] = useState<string>('CON/Q0603');
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [reviewDecision, setReviewDecision] = useState<'ACCEPT' | 'REJECT' | 'MODIFY' | 'FLAG'>('ACCEPT');
+  const [chosenAlternativeQp, setChosenAlternativeQp] = useState<string>('CON/Q0603');
+  const [reviewReason, setReviewReason] = useState<string>('');
+  const [mappingAssessorNotes, setMappingAssessorNotes] = useState<string>('');
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [assessorRemarks, setAssessorRemarks] = useState(
     'Candidate exhibits strong hands-on proficiency in 3-phase wiring, terminal box connection, and standard LOTO isolation. Recommended for NSQF Level 5 competency.'
   );
   const [isSaving, setIsSaving] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [dbSynced, setDbSynced] = useState(false);
+
+  const allVerifiedQps = getAllVerifiedQualifications();
 
   // Fetch real candidate evaluation data from Supabase
   useEffect(() => {
@@ -60,6 +75,33 @@ export const AssessorCandidateView: React.FC = () => {
           if (app.aiAnalyses && app.aiAnalyses.length > 0) {
             setAiAnalysisData(app.aiAnalyses[0].result || app.aiAnalyses[0]);
           }
+          if (app.formData?.qualificationMappings?.length) {
+            setCandidateMappings(app.formData.qualificationMappings);
+          } else {
+            // Generate deterministic matches for candidate
+            const matches = performDeterministicMatch({
+              occupation: candidate.trade,
+              yearsExperience: candidate.yearsOfExperience,
+              skills: [
+                'Install electrical conduit and cables',
+                'Mount distribution boards and MCB accessories',
+                'Perform circuit testing and fault finding',
+                'Comply with electrical safety standards'
+              ],
+              tasks: [
+                'Install and terminate domestic & light industrial wiring',
+                'Assemble 3-phase motor control panels with Star-Delta starters',
+                'Test circuits using multimeter and megger'
+              ],
+              tools: [
+                'Multimeter',
+                'Megger insulation tester',
+                'Hydraulic crimper',
+                'Conduit bender'
+              ]
+            });
+            setCandidateMappings(matches);
+          }
           setDbSynced(true);
         }
       } catch (err) {
@@ -70,7 +112,34 @@ export const AssessorCandidateView: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [candidate.trade, candidate.yearsOfExperience]);
+
+  // Handle Mapping Review Decision Submission
+  const handleReviewDecisionSubmit = async () => {
+    setIsSubmittingReview(true);
+    try {
+      const qpCodeToSet = reviewDecision === 'MODIFY' ? chosenAlternativeQp : selectedMappingQp;
+      const res = await submitAssessorMappingReview({
+        applicationId: supabaseAppId || candidate.applicationId || 'default-app-id',
+        selectedQualificationCode: qpCodeToSet,
+        decision: reviewDecision,
+        assessorNotes: mappingAssessorNotes || 'Verified against official NCVET qualification requirements.',
+        rejectionReason: reviewDecision === 'REJECT' || reviewDecision === 'FLAG' ? reviewReason : undefined
+      });
+
+      if (res.success) {
+        setMappingStatus(res.status || reviewDecision);
+        showToast(`Assessor mapping decision recorded: ${res.status}`, 'success');
+        setIsReviewModalOpen(false);
+      } else {
+        showToast(res.error || 'Failed to submit review', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to submit mapping review', 'error');
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
 
   // Calculate weighted total score
   const totalWeight = scoringCriteria.reduce((acc, c) => acc + c.weight, 0);
@@ -245,6 +314,7 @@ export const AssessorCandidateView: React.FC = () => {
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {[
               { id: 'criteria', label: 'Practical Task Checklist', icon: <CheckCircle2 size={14} /> },
+              { id: 'mapping-review', label: 'Review NSQF Mapping', icon: <Award size={14} /> },
               { id: 'evidence', label: `Candidate Evidence (${evidenceList.length})`, icon: <FileText size={14} /> },
               { id: 'declaration', label: 'Self Declaration', icon: <BookOpen size={14} /> },
               { id: 'ai-insights', label: 'AI Skill Analysis Insights', icon: <Cpu size={14} /> }
@@ -541,6 +611,79 @@ export const AssessorCandidateView: React.FC = () => {
               )}
             </div>
           )}
+
+          {/* Tab 5: Review NSQF Qualification Mapping */}
+          {activeTab === 'mapping-review' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }} className="animate-fade-in">
+              <GlassCard style={{ padding: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                  <div>
+                    <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-accent-teal)', textTransform: 'uppercase' }}>
+                      ASSESSOR QUALIFICATION VERIFICATION
+                    </span>
+                    <h3 style={{ fontSize: '17px', fontWeight: 800, color: 'var(--color-primary-navy)', margin: '2px 0 0 0' }}>
+                      Candidate NSQF Qualification Mapping Review
+                    </h3>
+                  </div>
+                  <GlassBadge variant={mappingStatus === 'ACCEPTED' ? 'teal' : mappingStatus === 'REJECTED' ? 'error' : 'navy'}>
+                    Decision Status: {mappingStatus}
+                  </GlassBadge>
+                </div>
+
+                <p style={{ fontSize: '13px', color: 'var(--color-text-secondary)', marginTop: '8px', lineHeight: 1.5 }}>
+                  Review the system-suggested qualification matches for {candidate.name}. As an accredited assessor, you may accept the recommendation, select an alternative verified qualification pack, reject the mapping, or flag inconsistencies.
+                </p>
+
+                <div
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: '10px',
+                    background: '#f0f9ff',
+                    border: '1px solid #bae6fd',
+                    fontSize: '12px',
+                    color: '#0369a1',
+                    marginTop: '8px'
+                  }}
+                >
+                  <strong>Certification Integrity Notice: </strong>
+                  The AI mapping engine only suggests potential qualifications. The official qualification assignment and certification decision rests solely with the accredited human assessor.
+                </div>
+              </GlassCard>
+
+              {/* Candidate Matches */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                {candidateMappings.map((cand) => (
+                  <QualificationMatchCard
+                    key={cand.qpCode}
+                    match={cand}
+                    isSelected={selectedMappingQp === cand.qpCode}
+                    isAssessorMode={true}
+                    onAssessorAccept={() => {
+                      setSelectedMappingQp(cand.qpCode);
+                      setReviewDecision('ACCEPT');
+                      setIsReviewModalOpen(true);
+                    }}
+                    onAssessorReject={() => {
+                      setSelectedMappingQp(cand.qpCode);
+                      setReviewDecision('REJECT');
+                      setIsReviewModalOpen(true);
+                    }}
+                    onAssessorModify={() => {
+                      setSelectedMappingQp(cand.qpCode);
+                      setReviewDecision('MODIFY');
+                      setIsReviewModalOpen(true);
+                    }}
+                    onAssessorFlag={() => {
+                      setSelectedMappingQp(cand.qpCode);
+                      setReviewDecision('FLAG');
+                      setIsReviewModalOpen(true);
+                    }}
+                    status={selectedMappingQp === cand.qpCode ? mappingStatus : undefined}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right Column: SCORING PANEL (Sticky Assessor Grading) */}
@@ -695,6 +838,155 @@ export const AssessorCandidateView: React.FC = () => {
           </GlassCard>
         </div>
       </div>
+
+      {/* Assessor Review Decision Modal */}
+      {isReviewModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(11, 41, 66, 0.55)',
+            backdropFilter: 'blur(5px)',
+            zIndex: 100,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px'
+          }}
+        >
+          <div
+            className="glass-card animate-fade-in"
+            style={{
+              width: '100%',
+              maxWidth: '560px',
+              borderRadius: '24px',
+              background: '#ffffff',
+              boxShadow: '0 24px 48px -12px rgba(11, 41, 66, 0.25)',
+              padding: '28px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '10px',
+                    background: '#ffedd5',
+                    color: '#ea580c',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}
+                >
+                  <Award size={20} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '18px', fontWeight: 800, color: '#0f2744', margin: 0 }}>
+                    Assessor Review: Qualification Mapping
+                  </h3>
+                  <span style={{ fontSize: '12px', color: '#64748b' }}>
+                    Candidate: {candidate.name}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Decision selector */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 700, color: '#0f2744' }}>
+                Review Decision
+              </label>
+              <select
+                value={reviewDecision}
+                onChange={(e) => setReviewDecision(e.target.value as any)}
+                className="glass-input"
+                style={{ height: '42px', padding: '0 12px' }}
+              >
+                <option value="ACCEPT">Accept Suggested Qualification ({selectedMappingQp})</option>
+                <option value="MODIFY">Choose Another Available Qualification</option>
+                <option value="REJECT">Reject Suggestion (Insufficient Competency Coverage)</option>
+                <option value="FLAG">Flag Incorrect Mapping (Discrepancy / Misclassification)</option>
+              </select>
+            </div>
+
+            {/* Alternative QP dropdown if MODIFY */}
+            {reviewDecision === 'MODIFY' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 700, color: '#0f2744' }}>
+                  Select Alternative Verified Qualification Pack
+                </label>
+                <select
+                  value={chosenAlternativeQp}
+                  onChange={(e) => setChosenAlternativeQp(e.target.value)}
+                  className="glass-input"
+                  style={{ height: '42px', padding: '0 12px' }}
+                >
+                  {allVerifiedQps.map((qp) => (
+                    <option key={qp.code} value={qp.code}>
+                      {qp.title} ({qp.code} • NSQF Level {qp.nsqfLevel})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Reason input for REJECT or FLAG */}
+            {(reviewDecision === 'REJECT' || reviewDecision === 'FLAG') && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 700, color: '#991b1b' }}>
+                  Reason for {reviewDecision === 'REJECT' ? 'Rejection' : 'Flagging'} (Required)
+                </label>
+                <textarea
+                  value={reviewReason}
+                  onChange={(e) => setReviewReason(e.target.value)}
+                  placeholder="Specify why the suggested qualification pack is unsuitable or requires reassignment..."
+                  rows={3}
+                  className="glass-input"
+                  style={{ padding: '10px 12px', resize: 'vertical' }}
+                  required
+                />
+              </div>
+            )}
+
+            {/* General Assessor Notes */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <label style={{ fontSize: '13px', fontWeight: 700, color: '#0f2744' }}>
+                Assessor Verification Remarks / Observations
+              </label>
+              <textarea
+                value={mappingAssessorNotes}
+                onChange={(e) => setMappingAssessorNotes(e.target.value)}
+                placeholder="Candidate demonstrated core domestic wiring competency; practical assessment of distribution panel required..."
+                rows={3}
+                className="glass-input"
+                style={{ padding: '10px 12px', resize: 'vertical' }}
+              />
+            </div>
+
+            {/* Modal Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', paddingTop: '10px', borderTop: '1px solid #e2e8f0' }}>
+              <GlassButton
+                variant="secondary"
+                onClick={() => setIsReviewModalOpen(false)}
+                disabled={isSubmittingReview}
+              >
+                Cancel
+              </GlassButton>
+              <GlassButton
+                variant="primary"
+                onClick={handleReviewDecisionSubmit}
+                disabled={isSubmittingReview || ((reviewDecision === 'REJECT' || reviewDecision === 'FLAG') && !reviewReason.trim())}
+              >
+                {isSubmittingReview ? 'Recording Decision...' : 'Confirm Decision'}
+              </GlassButton>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @media (max-width: 960px) {

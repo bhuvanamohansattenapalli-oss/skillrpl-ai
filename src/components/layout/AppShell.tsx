@@ -20,6 +20,7 @@ import { SelfDeclarationPage } from '../views/SelfDeclarationPage';
 import { EvidencePage } from '../views/EvidencePage';
 import { AiAssistantPage } from '../views/AiAssistantPage';
 import { AiAnalysisPage } from '../views/AiAnalysisPage';
+import { QualificationMatchPage } from '../views/QualificationMatchPage';
 import { AssessmentPage } from '../views/AssessmentPage';
 import { AssessorDashboard } from '../views/AssessorDashboard';
 import { AssessorCandidateView } from '../views/AssessorCandidateView';
@@ -175,6 +176,8 @@ export const AppShell: React.FC = () => {
         return <AiAssistantPage />;
       case 'ai-analysis':
         return <AiAnalysisPage />;
+      case 'qualification-match':
+        return <QualificationMatchPage />;
       case 'assessment':
         return <AssessmentPage />;
       case 'results':

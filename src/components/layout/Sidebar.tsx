@@ -44,6 +44,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
     if (key === 'experience') return currentView === 'experience' || currentView === 'experience-detail';
     if (key === 'ai-assistant') return currentView === 'ai-assistant';
     if (key === 'ai-analysis') return currentView === 'ai-analysis';
+    if (key === 'qualification-match') return currentView === 'qualification-match';
     if (key === 'skill-assessment') return currentView === 'assessment';
     if (key === 'my-assessments') return currentView === 'declaration' || currentView === 'evidence';
     if (key === 'certification') return currentView === 'results';
@@ -271,6 +272,31 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
               }}
             >
               CORE AI
+            </span>
+          </span>
+        </button>
+
+        {/* 2.4 NSQF Qualification Mapping */}
+        <button
+          onClick={() => navigateTo('qualification-match')}
+          style={navItemStyle(isItemActive('qualification-match'))}
+          className="sidebar-btn"
+        >
+          <Award size={18} color={isItemActive('qualification-match') ? '#FFFFFF' : '#38bdf8'} />
+          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <span>NSQF Mapping</span>
+            <span
+              style={{
+                fontSize: '10px',
+                fontWeight: 700,
+                color: isItemActive('qualification-match') ? '#FFFFFF' : '#38bdf8',
+                background: isItemActive('qualification-match') ? 'rgba(255, 255, 255, 0.2)' : 'rgba(56, 189, 248, 0.15)',
+                border: isItemActive('qualification-match') ? '1px solid rgba(255, 255, 255, 0.35)' : '1px solid rgba(56, 189, 248, 0.3)',
+                padding: '1px 6px',
+                borderRadius: '6px'
+              }}
+            >
+              NCVET
             </span>
           </span>
         </button>

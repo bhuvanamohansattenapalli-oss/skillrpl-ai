@@ -151,7 +151,32 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     return true;
   }
 
-  // 2. Safe Test Endpoint: GET /api/ai/test
+  // 2. Qualification Mapping Test Suite Endpoint: GET /api/test/qualification-mapping
+  if (pathname === '/api/test/qualification-mapping') {
+    if (req.method !== 'GET') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use GET.' });
+      return true;
+    }
+
+    try {
+      const { runAllQualificationMappingTests } = await import('../lib/mapping/qualification-engine.test.ts');
+      const testReport = await runAllQualificationMappingTests();
+      sendJsonResponse(res, 200, {
+        success: testReport.allPassed,
+        ...testReport
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Qualification Mapping Test Error]', err);
+      sendJsonResponse(res, 500, {
+        success: false,
+        error: err.message || 'Test suite execution failed.'
+      });
+      return true;
+    }
+  }
+
+  // 2.1 Safe Test Endpoint: GET /api/ai/test
   if (pathname === '/api/ai/test') {
     if (req.method !== 'GET') {
       sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use GET.' });
@@ -1230,6 +1255,325 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         success: false,
         error: err.message || 'AI skill analysis failed. Please verify internet connectivity.',
         code: err.code || 'AI_ANALYSIS_FAILED'
+      });
+      return true;
+    }
+  }
+
+  // =========================================================================
+  // 11. NSQF QUALIFICATION PACK MAPPING ENGINE (PHASE 3)
+  // =========================================================================
+
+  // 11.1 List Verified Qualifications Catalog: GET /api/qualifications
+  if (pathname === '/api/qualifications' && req.method === 'GET') {
+    try {
+      const { VERIFIED_QUALIFICATIONS } = await import('../data/qualification-catalog.ts');
+      
+      // Optionally sync to database in the background if db is configured
+      if (isDatabaseConfigured()) {
+        try {
+          const { syncVerifiedQualificationsToDatabase } = await import('./seed-qualifications.ts');
+          syncVerifiedQualificationsToDatabase().catch((e) => console.warn('[Background QP Sync Warning]', e));
+        } catch {}
+      }
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        source: 'National Qualifications Register (NQR) / NCVET',
+        qualifications: VERIFIED_QUALIFICATIONS
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Get Qualifications Catalog Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to fetch qualifications.' });
+      return true;
+    }
+  }
+
+  // 11.2 Map Worker Experience to Qualifications: POST /api/worker/application/map-qualification
+  if (pathname === '/api/worker/application/map-qualification' && req.method === 'POST') {
+    try {
+      const body: any = await parseRequestBody(req);
+      const {
+        applicationId,
+        occupation = 'Skilled Worker',
+        yearsExperience = 3,
+        skills = [],
+        tasks = [],
+        tools = [],
+        responsibilities = [],
+        experienceDescription = '',
+        additionalExperience = '',
+        forceOffline = false
+      } = body;
+
+      if (!applicationId) {
+        sendJsonResponse(res, 400, { success: false, error: 'Application ID is required for qualification mapping.' });
+        return true;
+      }
+
+      // Security check: Verify authenticated worker owns this application
+      let authenticatedWorker: any = null;
+      try {
+        const resolved = await resolveAuthenticatedWorker(req);
+        authenticatedWorker = resolved.workerProfile;
+      } catch (authErr) {
+        // Fallback for offline or local preview
+      }
+
+      const { prisma } = await import('../lib/db.ts');
+
+      if (authenticatedWorker) {
+        const app = await prisma.rPLApplication.findFirst({
+          where: { id: applicationId, workerProfileId: authenticatedWorker.id }
+        });
+        if (!app) {
+          sendJsonResponse(res, 403, {
+            success: false,
+            code: 'FORBIDDEN_APPLICATION_ACCESS',
+            error: 'Forbidden: You cannot access or map another candidate worker’s RPL application.'
+          });
+          return true;
+        }
+      }
+
+      // Run Hybrid Mapping Engine (Deterministic + Gemini 3.6 Flash)
+      const { performHybridQualificationMapping } = await import('../lib/mapping/qualification-engine.ts');
+
+      const mappingResponse = await performHybridQualificationMapping({
+        occupation,
+        yearsExperience: Number(yearsExperience) || 0,
+        skills: Array.isArray(skills) ? skills : [],
+        tasks: Array.isArray(tasks) ? tasks : [],
+        tools: Array.isArray(tools) ? tools : [],
+        responsibilities: Array.isArray(responsibilities) ? responsibilities : [],
+        experienceDescription,
+        additionalExperience
+      }, { forceOffline: Boolean(forceOffline) });
+
+      // Save Mappings into Database if configured and application exists
+      if (isDatabaseConfigured() && mappingResponse.success && mappingResponse.candidates.length > 0) {
+        try {
+          // Ensure QPs exist in database
+          const { syncVerifiedQualificationsToDatabase } = await import('./seed-qualifications.ts');
+          await syncVerifiedQualificationsToDatabase();
+
+          // Upsert or clear previous mappings for this application
+          await prisma.qualificationMapping.deleteMany({
+            where: { rplApplicationId: applicationId }
+          });
+
+          for (const cand of mappingResponse.candidates) {
+            const dbQp = await prisma.qualificationPack.findFirst({
+              where: { code: cand.qpCode }
+            });
+
+            if (dbQp) {
+              await prisma.qualificationMapping.create({
+                data: {
+                  rplApplicationId: applicationId,
+                  qualificationPackId: dbQp.id,
+                  matchScore: cand.systemMatchScore,
+                  matchRank: cand.matchRank,
+                  matchReason: cand.whyMatches.experienceRelevance || cand.qualification.description,
+                  matchedSkills: cand.whyMatches.matchedSkills,
+                  matchedTasks: cand.whyMatches.matchedTasks,
+                  matchedTools: cand.whyMatches.matchedTools,
+                  experienceRelevance: cand.whyMatches.experienceRelevance,
+                  potentialGaps: cand.potentialGaps,
+                  evidenceRequired: cand.evidenceRequired,
+                  methodology: cand.methodology,
+                  status: 'SUGGESTED'
+                }
+              });
+            }
+          }
+
+          // Update application formData snapshot
+          const existingApp = await prisma.rPLApplication.findUnique({
+            where: { id: applicationId }
+          });
+          if (existingApp) {
+            const currFormData: any = existingApp.formData || {};
+            await prisma.rPLApplication.update({
+              where: { id: applicationId },
+              data: {
+                tradeTitle: mappingResponse.candidates[0]?.title || existingApp.tradeTitle,
+                formData: {
+                  ...currFormData,
+                  qualificationMappings: mappingResponse.candidates.map((c) => ({
+                    qpCode: c.qpCode,
+                    title: c.title,
+                    nsqfLevel: c.nsqfLevel,
+                    systemMatchScore: c.systemMatchScore,
+                    matchRank: c.matchRank,
+                    rankLabel: c.rankLabel,
+                    confidenceLabel: c.confidenceLabel,
+                    whyMatches: c.whyMatches,
+                    potentialGaps: c.potentialGaps,
+                    evidenceRequired: c.evidenceRequired,
+                    methodology: c.methodology
+                  })),
+                  mappedAt: new Date().toISOString()
+                }
+              }
+            });
+          }
+        } catch (dbErr) {
+          console.warn('[DB Qualification Mapping Persistence Notice]', dbErr);
+        }
+      }
+
+      sendJsonResponse(res, 200, mappingResponse);
+      return true;
+    } catch (err: any) {
+      console.error('[Qualification Mapping Error]', err);
+      sendJsonResponse(res, 500, {
+        success: false,
+        error: err.message || 'Qualification mapping failed.',
+        code: 'MAPPING_FAILED'
+      });
+      return true;
+    }
+  }
+
+  // 11.3 Get Application Qualification Mappings: GET /api/worker/application/mappings
+  if (pathname === '/api/worker/application/mappings' && req.method === 'GET') {
+    try {
+      const applicationId = parsedUrl.searchParams.get('applicationId');
+      if (!applicationId) {
+        sendJsonResponse(res, 400, { success: false, error: 'Application ID is required.' });
+        return true;
+      }
+
+      const { prisma } = await import('../lib/db.ts');
+
+      const mappings = await prisma.qualificationMapping.findMany({
+        where: { rplApplicationId: applicationId },
+        include: {
+          qualificationPack: {
+            include: {
+              qualificationUnits: true
+            }
+          }
+        },
+        orderBy: { matchRank: 'asc' }
+      });
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        mappings
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Get Application Mappings Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to fetch mappings.' });
+      return true;
+    }
+  }
+
+  // 11.4 Assessor Review Mapping Decision: POST /api/assessor/mapping-review
+  if (pathname === '/api/assessor/mapping-review' && req.method === 'POST') {
+    try {
+      const body: any = await parseRequestBody(req);
+      const {
+        applicationId,
+        mappingId,
+        selectedQualificationCode,
+        decision, // 'ACCEPT' | 'REJECT' | 'MODIFY' | 'FLAG'
+        assessorNotes,
+        rejectionReason
+      } = body;
+
+      if (!applicationId || !decision) {
+        sendJsonResponse(res, 400, {
+          success: false,
+          error: 'Application ID and decision (ACCEPT, REJECT, MODIFY, FLAG) are required.'
+        });
+        return true;
+      }
+
+      const { prisma } = await import('../lib/db.ts');
+
+      // Verify application exists
+      const application = await prisma.rPLApplication.findUnique({
+        where: { id: applicationId },
+        include: { qualificationMappings: true }
+      });
+
+      if (!application) {
+        sendJsonResponse(res, 404, { success: false, error: 'Application not found.' });
+        return true;
+      }
+
+      // Map decision to MappingStatus
+      let targetStatus: 'ACCEPTED' | 'REJECTED' | 'MODIFIED_BY_ASSESSOR' | 'FLAGGED_INCORRECT' = 'ACCEPTED';
+      if (decision === 'REJECT') targetStatus = 'REJECTED';
+      else if (decision === 'MODIFY') targetStatus = 'MODIFIED_BY_ASSESSOR';
+      else if (decision === 'FLAG') targetStatus = 'FLAGGED_INCORRECT';
+
+      // Find target qualification pack if selecting or accepting
+      let targetQp = null;
+      if (selectedQualificationCode) {
+        targetQp = await prisma.qualificationPack.findFirst({
+          where: {
+            OR: [
+              { code: selectedQualificationCode },
+              { qpCode: selectedQualificationCode }
+            ]
+          }
+        });
+      }
+
+      // If mappingId provided, update that specific mapping
+      if (mappingId) {
+        await prisma.qualificationMapping.update({
+          where: { id: mappingId },
+          data: {
+            status: targetStatus,
+            assessorNotes: assessorNotes || null,
+            rejectionReason: rejectionReason || null,
+            reviewedAt: new Date()
+          }
+        });
+      } else {
+        // Update all mappings for this application
+        await prisma.qualificationMapping.updateMany({
+          where: { rplApplicationId: applicationId },
+          data: {
+            status: targetStatus,
+            assessorNotes: assessorNotes || null,
+            rejectionReason: rejectionReason || null,
+            reviewedAt: new Date()
+          }
+        });
+      }
+
+      // If ACCEPT or MODIFY, associate the confirmed QualificationPack with the RPLApplication
+      if ((decision === 'ACCEPT' || decision === 'MODIFY') && targetQp) {
+        await prisma.rPLApplication.update({
+          where: { id: applicationId },
+          data: {
+            qualificationPackId: targetQp.id,
+            tradeTitle: targetQp.title,
+            updatedAt: new Date()
+          }
+        });
+      }
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        message: `Assessor mapping decision recorded: ${targetStatus}.`,
+        status: targetStatus,
+        qualificationPackId: targetQp?.id || null,
+        qualificationTitle: targetQp?.title || null
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Assessor Mapping Review Error]', err);
+      sendJsonResponse(res, 500, {
+        success: false,
+        error: err.message || 'Failed to submit assessor mapping review.'
       });
       return true;
     }

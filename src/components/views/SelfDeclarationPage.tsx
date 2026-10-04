@@ -10,7 +10,8 @@ import {
   AlertTriangle,
   WifiOff,
   Send,
-  Info
+  Info,
+  Layers
 } from 'lucide-react';
 import { GlassCard } from '../common/GlassCard';
 import { GlassButton } from '../common/GlassButton';
@@ -25,6 +26,9 @@ import {
   analyzeWorkerSkillsWithAI,
   submitWorkerApplication
 } from '../../lib/api/worker-application';
+import { requestQualificationMapping } from '../../lib/api/qualification-mapping';
+import { QualificationMatchCard } from '../common/QualificationMatchCard';
+import type { CandidateMatchResult } from '../../lib/mapping/qualification-engine';
 import type {
   RPLApplicationFormData,
   WorkerExperienceEntry,
@@ -50,6 +54,7 @@ export const SelfDeclarationPage: React.FC = () => {
   const [appStatus, setAppStatus] = useState<RPLApplicationStatus>('DRAFT');
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [candidateMatches, setCandidateMatches] = useState<CandidateMatchResult[]>([]);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
@@ -415,6 +420,34 @@ export const SelfDeclarationPage: React.FC = () => {
 
         setAppStatus('ASSESSMENT_READY');
         showToast('Gemini 3.6 Flash skill diagnostic completed!', 'success');
+
+        // Automatically run NSQF Qualification Pack Matching
+        try {
+          const mappingRes = await requestQualificationMapping(
+            applicationId || 'local-draft',
+            {
+              occupation: formData.trade,
+              yearsExperience: Number(formData.yearsOfExperience) || 3,
+              skills: skillsList,
+              tasks: tasksList,
+              tools: toolsList,
+              experienceDescription: combinedExp
+            },
+            session?.access_token
+          );
+
+          if (mappingRes.success && mappingRes.candidates.length > 0) {
+            setCandidateMatches(mappingRes.candidates);
+            setFormData((prev) => ({
+              ...prev,
+              selectedQpCode: prev.selectedQpCode || mappingRes.candidates[0].qpCode,
+              qualificationMappings: mappingRes.candidates
+            }));
+            showToast('NSQF Qualification Pack candidates mapped!', 'success');
+          }
+        } catch (mapErr) {
+          console.warn('[SelfDeclarationPage] Qualification mapping notice:', mapErr);
+        }
       } else {
         showToast(res.error || 'AI analysis unavailable. Please retry.', 'error');
       }
@@ -1280,6 +1313,42 @@ export const SelfDeclarationPage: React.FC = () => {
                     </ul>
                   </div>
                 ) : null}
+
+                {/* STEP 5B: NSQF Qualification Pack Candidate Matches */}
+                <div style={{ marginTop: '12px', borderTop: '1px solid rgba(2, 132, 199, 0.2)', paddingTop: '16px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap', gap: '8px' }}>
+                    <div>
+                      <h4 style={{ fontSize: '15px', fontWeight: 800, color: '#0f2744', margin: 0 }}>
+                        Candidate NSQF Qualification Packs ({candidateMatches.length || (formData.qualificationMappings?.length || 0)})
+                      </h4>
+                      <span style={{ fontSize: '12px', color: '#64748b' }}>
+                        Recommended based on verified NCVET / NQR standards
+                      </span>
+                    </div>
+
+                    <GlassButton
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setCurrentView('qualification-match')}
+                    >
+                      <Layers size={13} />
+                      <span>Open Full NSQF Mapping View</span>
+                    </GlassButton>
+                  </div>
+
+                  {(candidateMatches.length > 0 ? candidateMatches : (formData.qualificationMappings as CandidateMatchResult[]) || []).map((cand) => (
+                    <div key={cand.qpCode} style={{ marginBottom: '14px' }}>
+                      <QualificationMatchCard
+                        match={cand}
+                        isSelected={formData.selectedQpCode === cand.qpCode}
+                        onSelect={() => {
+                          setFormData((prev) => ({ ...prev, selectedQpCode: cand.qpCode }));
+                          showToast(`Selected ${cand.title} (${cand.qpCode}) for RPL assessment.`, 'info');
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : (
               <div
@@ -1292,7 +1361,7 @@ export const SelfDeclarationPage: React.FC = () => {
                   color: '#64748b'
                 }}
               >
-                Click <strong>"Analyze My Skills"</strong> above to generate objective competency insights.
+                Click <strong>"Analyze My Skills"</strong> above to extract competencies and generate candidate qualification pack matches.
               </div>
             )}
           </div>

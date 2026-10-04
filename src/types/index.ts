@@ -10,6 +10,7 @@ export type AppView =
   | 'evidence'
   | 'ai-assistant'
   | 'ai-analysis'
+  | 'qualification-match'
   | 'assessment'
   | 'results'
   | 'assessor-dashboard'
@@ -269,7 +270,7 @@ export interface RPLApplicationFormData {
   // Step 4: Skills & Tasks (Self-declared)
   skills: SelfDeclaredSkillEntry[];
 
-  // Step 5: AI Analysis results snapshot
+  // Step 5: AI Analysis & Qualification Mapping results snapshot
   aiAnalysisId?: string;
   aiAnalysisSnapshot?: {
     summary?: string;
@@ -282,6 +283,10 @@ export interface RPLApplicationFormData {
     model?: string;
     createdAt?: string;
   };
+  selectedQpCode?: string;
+  qualificationMappings?: any[];
+  mappingStatus?: 'SUGGESTED' | 'ACCEPTED' | 'REJECTED' | 'FLAGGED_INCORRECT' | 'MODIFIED_BY_ASSESSOR';
+  assessorMappingNotes?: string;
 
   // Step 6: Evidence (marked "Next step")
   evidenceNote?: string;

@@ -61,6 +61,14 @@ enum MessageRole {
   SYSTEM
 }
 
+enum MappingStatus {
+  SUGGESTED
+  ACCEPTED
+  REJECTED
+  FLAGGED_INCORRECT
+  MODIFIED_BY_ASSESSOR
+}
+
 // ==========================================
 // USER & PROFILES
 // ==========================================
@@ -163,17 +171,59 @@ model QualificationPack {
   sector              String
   nsqfLevel           Int
   description         String?
+  awardingBody        String?               @default("NCVET / Sector Skill Council")
+  status              String?               @default("ACTIVE")
+  source              String?               @default("National Qualifications Register (NQR)")
+  sourceUrl           String?               @default("https://nqr.gov.in")
+  version             String?               @default("1.0")
+  effectiveDate       DateTime?
   isDemo              Boolean               @default(false)
   tradeId             String
   trade               Trade                 @relation(fields: [tradeId], references: [id], onDelete: Cascade)
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
 
-  qualificationSkills QualificationSkill[]
-  rplApplications     RPLApplication[]
-  assessmentCriteria  AssessmentCriterion[]
+  qualificationSkills   QualificationSkill[]
+  qualificationUnits    QualificationUnit[]
+  qualificationMappings QualificationMapping[]
+  rplApplications       RPLApplication[]
+  assessmentCriteria    AssessmentCriterion[]
 
   @@map("qualification_packs")
+}
+
+model QualificationUnit {
+  id                    String            @id @default(uuid())
+  qualificationPackId   String
+  qualificationPack     QualificationPack @relation(fields: [qualificationPackId], references: [id], onDelete: Cascade)
+  code                  String            // e.g. CON/N0605
+  title                 String            // e.g. Lay electrical conduits and cables
+  description           String?
+  nsqfLevel             Int?
+  isMandatory           Boolean           @default(true)
+  assessmentCriteriaRef String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  skillKeywords         SkillKeyword[]
+
+  @@index([qualificationPackId])
+  @@index([code])
+  @@map("qualification_units")
+}
+
+model SkillKeyword {
+  id                  String            @id @default(uuid())
+  qualificationUnitId String
+  qualificationUnit   QualificationUnit @relation(fields: [qualificationUnitId], references: [id], onDelete: Cascade)
+  keyword             String            // e.g. "wiring", "conduit", "multimeter"
+  task                String?           // practical task description
+  skill               String?           // competency / skill area
+  createdAt           DateTime          @default(now())
+
+  @@index([qualificationUnitId])
+  @@index([keyword])
+  @@map("skill_keywords")
 }
 
 model Skill {
@@ -326,13 +376,47 @@ model RPLApplication {
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
 
-  assessments         Assessment[]
-  aiAnalyses          AIAnalysis[]
-  competencyResults   CompetencyResult[]
-  experiences         RPLApplicationExperience[]
-  skills              RPLApplicationSkill[]
+  assessments           Assessment[]
+  aiAnalyses            AIAnalysis[]
+  competencyResults     CompetencyResult[]
+  experiences           RPLApplicationExperience[]
+  skills                RPLApplicationSkill[]
+  qualificationMappings QualificationMapping[]
 
   @@map("rpl_applications")
+}
+
+model QualificationMapping {
+  id                   String            @id @default(uuid())
+  rplApplicationId     String
+  rplApplication       RPLApplication    @relation(fields: [rplApplicationId], references: [id], onDelete: Cascade)
+  qualificationPackId  String
+  qualificationPack    QualificationPack @relation(fields: [qualificationPackId], references: [id], onDelete: Cascade)
+
+  matchScore           Float             // 0-100 system match score
+  matchRank            Int               @default(1) // 1 = Best Match, 2 = Alternative, 3 = Possible
+  matchReason          String?
+  matchedSkills        String[]          @default([])
+  matchedTasks         String[]          @default([])
+  matchedTools         String[]          @default([])
+  experienceRelevance  String?
+  potentialGaps        String[]          @default([])
+  evidenceRequired     String[]          @default([])
+  methodology          String?           @default("HYBRID") // "DETERMINISTIC" | "HYBRID" | "LOCAL_OFFLINE"
+
+  // Assessor Review
+  status               MappingStatus     @default(SUGGESTED)
+  assessorNotes        String?
+  rejectionReason      String?
+  reviewedAt           DateTime?
+  reviewedByAssessorId String?
+
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  @@index([rplApplicationId])
+  @@index([qualificationPackId])
+  @@map("qualification_mappings")
 }
 
 model RPLApplicationExperience {
