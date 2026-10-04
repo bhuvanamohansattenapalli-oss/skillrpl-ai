@@ -19,6 +19,29 @@ function sendJsonResponse(res: ServerResponse, statusCode: number, data: unknown
  * Helper to safely parse JSON body from incoming request stream
  */
 function parseRequestBody(req: IncomingMessage, maxBytes = 100_000): Promise<unknown> {
+  // 1. If Vercel or serverless middleware already parsed the request body:
+  if ((req as any).body !== undefined && (req as any).body !== null) {
+    const existingBody = (req as any).body;
+    if (typeof existingBody === 'object') {
+      return Promise.resolve(existingBody);
+    }
+    if (typeof existingBody === 'string') {
+      if (!existingBody.trim()) return Promise.resolve({});
+      try {
+        return Promise.resolve(JSON.parse(existingBody));
+      } catch {
+        const err = new Error('Malformed JSON payload.') as Error & { status?: number };
+        err.status = 400;
+        return Promise.reject(err);
+      }
+    }
+  }
+
+  // 2. If stream has already ended or completed, avoid hanging on event listeners
+  if ((req as any).readableEnded || (req as any).complete) {
+    return Promise.resolve({});
+  }
+
   return new Promise((resolve, reject) => {
     let rawData = '';
     let totalBytes = 0;
@@ -26,7 +49,9 @@ function parseRequestBody(req: IncomingMessage, maxBytes = 100_000): Promise<unk
     req.on('data', (chunk) => {
       totalBytes += chunk.length;
       if (totalBytes > maxBytes) {
-        reject(new Error('Payload too large. Maximum 100KB allowed.'));
+        const err = new Error('Payload too large. Maximum 100KB allowed.') as Error & { status?: number };
+        err.status = 413;
+        reject(err);
         req.destroy();
         return;
       }
@@ -42,7 +67,9 @@ function parseRequestBody(req: IncomingMessage, maxBytes = 100_000): Promise<unk
         const parsed = JSON.parse(rawData);
         resolve(parsed);
       } catch {
-        reject(new Error('Malformed JSON payload.'));
+        const err = new Error('Malformed JSON payload.') as Error & { status?: number };
+        err.status = 400;
+        reject(err);
       }
     });
 
@@ -74,7 +101,23 @@ function checkRateLimit(): boolean {
 export async function handleApiRoute(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const url = req.url || '';
   const parsedUrl = new URL(url, `http://${req.headers.host || 'localhost'}`);
-  const pathname = parsedUrl.pathname;
+  
+  // Resolve pathname accurately across local Vite dev server and Vercel Serverless Function rewrites
+  let pathname = parsedUrl.pathname;
+  
+  const vercelRoute = parsedUrl.searchParams.get('__route');
+  if (vercelRoute) {
+    const cleanRoute = vercelRoute.startsWith('/') ? vercelRoute : `/${vercelRoute}`;
+    pathname = cleanRoute.startsWith('/api/') ? cleanRoute : `/api${cleanRoute}`;
+  } else {
+    const matchedPath =
+      (req.headers['x-matched-path'] as string) ||
+      (req.headers['x-vercel-matched-path'] as string) ||
+      (req.headers['x-forwarded-uri'] as string);
+    if (matchedPath && matchedPath.startsWith('/api/')) {
+      pathname = matchedPath.split('?')[0];
+    }
+  }
 
   // 1. Health check endpoint: GET /api/health
   if (pathname === '/api/health') {
