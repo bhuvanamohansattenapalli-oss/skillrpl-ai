@@ -3,22 +3,22 @@
  * Comprehensive 20-Point End-to-End Test Suite for SIH26242
  */
 
-import { generateAssessmentPlan, verifyAssessmentPlanIntegrity } from './task-generator';
+import { generateAssessmentPlan, verifyAssessmentPlanIntegrity } from './task-generator.js';
 import {
   STANDARDIZED_RUBRIC,
   validateCriterionScore,
   calculateAssessmentMetrics
-} from './scoring-rubric';
-import { performAIAssessmentAssistance } from './ai-assessor-copilot';
+} from './scoring-rubric.js';
+import { performAIAssessmentAssistance } from './ai-assessor-copilot.js';
 import {
   analyzeInterAssessorConsistency,
   BENCHMARK_EVALUATION_DATASET
-} from './inter-assessor-consistency';
+} from './inter-assessor-consistency.js';
 import {
   detectSyncConflict,
   type LocalAssessmentSession
-} from './offline-assessment';
-import { getQualificationByCode } from '../../data/qualification-catalog';
+} from './offline-assessment.js';
+import { getQualificationByCode } from '../../data/qualification-catalog.js';
 
 export interface TestResult {
   testNumber: number;

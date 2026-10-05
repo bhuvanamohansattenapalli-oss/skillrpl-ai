@@ -5,13 +5,13 @@
 import {
   VERIFIED_QUALIFICATIONS,
   type VerifiedQualification
-} from '../../data/qualification-catalog';
+} from '../../data/qualification-catalog.js';
 import {
   performDeterministicMatch,
   type WorkerMappingInput,
   type CandidateMatchResult,
   type QualificationMappingResponse
-} from '../mapping/qualification-engine';
+} from '../mapping/qualification-engine.js';
 
 const QUALIFICATION_CACHE_KEY = 'skillrpl_nsqf_catalog_v1';
 const MAPPING_DRAFT_KEY_PREFIX = 'skillrpl_mapping_draft_';

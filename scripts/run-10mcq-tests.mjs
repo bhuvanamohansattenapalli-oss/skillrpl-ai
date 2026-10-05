@@ -1,7 +1,7 @@
 /**
  * Standalone Execution Script for 10-MCQ Topic-Based RPL Assessment Test Suite (SIH26242 Phase 4)
  */
-import { runAll10MCQAssessmentTests } from '../src/lib/assessment/mcq-assessment.test';
+import { runAll10MCQAssessmentTests } from '../src/lib/assessment/mcq-assessment.test.js';
 
 async function main() {
   console.log('=================================================================');

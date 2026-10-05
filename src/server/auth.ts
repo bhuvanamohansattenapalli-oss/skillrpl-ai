@@ -1,5 +1,5 @@
-import { prisma } from '../lib/db';
-import { getSupabaseClient, getServerSupabaseClient } from '../lib/supabase';
+import { prisma } from '../lib/db.js';
+import { getSupabaseClient, getServerSupabaseClient } from '../lib/supabase.js';
 
 export interface SyncProfileData {
   userId?: string;

@@ -13,12 +13,13 @@ import {
   groupTasksByCompetency,
   type PracticalTaskDefinition,
   type ObservableCriterion
-} from './task-bank';
+} from './task-bank.js';
 
 export interface GeneratedAssessmentCriterion extends ObservableCriterion {
   id: string; // unique ID: e.g. "TASK-CON-Q0603-N0607-A__tools_ppe"
   taskId: string;
   criterionKey: string;
+  isMandatory: boolean;
   scoreAwarded?: number;
   rubricLevel?: string;
   observation?: string;
@@ -114,7 +115,8 @@ export function generateAssessmentPlan(
       ...crit,
       id: `${selected.taskId}__${crit.key}`,
       taskId: selected.taskId,
-      criterionKey: crit.key
+      criterionKey: crit.key,
+      isMandatory: Boolean(crit.isMandatory)
     }));
 
     selectedTasks.push({

@@ -4,7 +4,7 @@
  * offline fallback, and background synchronization.
  */
 
-import { getSupabaseClient } from '../supabase';
+import { getSupabaseClient } from '../supabase.js';
 import {
   isOnline,
   createOfflineAttemptLocally,
@@ -14,7 +14,7 @@ import {
   queueOfflineSubmission,
   getPendingSubmissions,
   type OfflineAttemptData
-} from '../assessment/offline-mcq';
+} from '../assessment/offline-mcq.js';
 
 export interface MCQQuestionClient {
   id: string;

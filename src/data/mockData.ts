@@ -8,7 +8,7 @@ import type {
   ScoringCriterion,
   SkillResult,
   NotificationItem
-} from '../types';
+} from '../types/index.js';
 
 export const mockCandidateProfile: CandidateProfile = {
   id: 'cand-001',

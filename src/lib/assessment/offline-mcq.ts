@@ -4,7 +4,7 @@
  * and seamlessly synchronizes completed attempts when internet connectivity returns.
  */
 
-import { selectQuestionsFromBank, type VerifiedMCQQuestion } from './mcq-question-bank';
+import { selectQuestionsFromBank, type VerifiedMCQQuestion } from './mcq-question-bank.js';
 
 export interface OfflineAttemptData {
   attemptId: string;

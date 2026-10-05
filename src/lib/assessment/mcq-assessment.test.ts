@@ -4,11 +4,11 @@
  * server-side scoring, security hiding, assessor review, and AI summary.
  */
 
-import { selectQuestionsFromBank, findQuestionSetForTopic, VERIFIED_MCQ_BANK } from './mcq-question-bank';
-import { generate10MCQQuestions, generateAIPerformanceSummary } from './ai-mcq-generator';
-import { createOfflineAttemptLocally, autosaveAnswers, loadAutosavedAnswers } from './offline-mcq';
-import { generateRplChatResponse } from '../ai/rpl-assistant';
-import { prisma } from '../db';
+import { selectQuestionsFromBank, findQuestionSetForTopic, VERIFIED_MCQ_BANK } from './mcq-question-bank.js';
+import { generate10MCQQuestions, generateAIPerformanceSummary } from './ai-mcq-generator.js';
+import { createOfflineAttemptLocally, autosaveAnswers, loadAutosavedAnswers } from './offline-mcq.js';
+import { generateRplChatResponse } from '../ai/rpl-assistant.js';
+import { prisma } from '../db.js';
 
 export interface MCQTestResult {
   testNumber: number;

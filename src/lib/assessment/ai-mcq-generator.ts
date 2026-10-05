@@ -5,8 +5,8 @@
  * rate-limited (429), or offline.
  */
 
-import { getGeminiClient, getGeminiModel, isGeminiConfigured } from '../ai/gemini';
-import { selectQuestionsFromBank, type VerifiedMCQQuestion, findQuestionSetForTopic } from './mcq-question-bank';
+import { getGeminiClient, getGeminiModel, isGeminiConfigured } from '../ai/gemini.js';
+import { selectQuestionsFromBank, type VerifiedMCQQuestion, findQuestionSetForTopic } from './mcq-question-bank.js';
 
 export interface AssessmentGenerationResult {
   questions: VerifiedMCQQuestion[];

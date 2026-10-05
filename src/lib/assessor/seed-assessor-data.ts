@@ -1,4 +1,4 @@
-import { prisma } from '../db';
+import { prisma } from '../db.js';
 
 /**
  * Initializes essential demo data in Supabase if not already present,

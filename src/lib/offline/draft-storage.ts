@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { RPLApplicationFormData, RPLApplicationStatus } from '../../types';
+import type { RPLApplicationFormData, RPLApplicationStatus } from '../../types/index.js';
 
 export interface LocalRPLDraft {
   id: string; // application id or 'local-draft'

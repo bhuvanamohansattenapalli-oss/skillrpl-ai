@@ -1,6 +1,6 @@
-import { getGeminiClient, getGeminiModel } from './gemini';
-import { RPL_SYSTEM_INSTRUCTION } from './prompts';
-import type { ChatRequest, ChatSuccessResponse } from './types';
+import { getGeminiClient, getGeminiModel } from './gemini.js';
+import { RPL_SYSTEM_INSTRUCTION } from './prompts.js';
+import type { ChatRequest, ChatSuccessResponse } from './types.js';
 
 interface GeminiContentPart {
   text: string;

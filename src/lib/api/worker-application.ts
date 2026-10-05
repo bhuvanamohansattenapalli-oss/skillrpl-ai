@@ -3,12 +3,12 @@ import {
   getLocalDraft,
   isDeviceOnline,
   type LocalRPLDraft
-} from '../offline/draft-storage';
+} from '../offline/draft-storage.js';
 import type {
   RPLApplicationFormData,
   RPLApplicationStatus,
   RPLApplicationListItem
-} from '../../types';
+} from '../../types/index.js';
 
 export interface SaveApplicationPayload {
   id?: string;

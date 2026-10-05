@@ -9,9 +9,9 @@ import {
   saveAssessmentLocally,
   recordLocalCriterionScore,
   markAssessmentSynced
-} from '../assessment/offline-assessment';
-import { generateAssessmentPlan } from '../assessment/task-generator';
-import { performAIAssessmentAssistance } from '../assessment/ai-assessor-copilot';
+} from '../assessment/offline-assessment.js';
+import { generateAssessmentPlan } from '../assessment/task-generator.js';
+import { performAIAssessmentAssistance } from '../assessment/ai-assessor-copilot.js';
 
 export interface ScoreSubmissionPayload {
   assessmentId: string;

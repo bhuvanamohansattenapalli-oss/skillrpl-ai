@@ -16,7 +16,7 @@
  */
 
 import { GoogleGenAI } from '@google/genai';
-import { isGeminiConfigured, getGeminiModel } from '../ai/gemini';
+import { isGeminiConfigured, getGeminiModel } from '../ai/gemini.js';
 
 export interface AssessorTaskEvaluation {
   taskId: string;

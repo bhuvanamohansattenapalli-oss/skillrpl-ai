@@ -15,8 +15,8 @@
 import {
   VERIFIED_QUALIFICATIONS,
   type VerifiedQualification
-} from '../../data/qualification-catalog';
-import { isGeminiConfigured, getGeminiModel, getGeminiClient } from '../ai/gemini';
+} from '../../data/qualification-catalog.js';
+import { isGeminiConfigured, getGeminiModel, getGeminiClient } from '../ai/gemini.js';
 
 export interface WorkerMappingInput {
   occupation: string;

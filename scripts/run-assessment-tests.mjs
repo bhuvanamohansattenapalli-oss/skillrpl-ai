@@ -1,7 +1,7 @@
 /**
  * Standalone Execution Script for Practical RPL Assessment & Assessor Scoring Test Suite
  */
-import { runAllAssessmentTests } from '../src/lib/assessment/assessment-engine.test';
+import { runAllAssessmentTests } from '../src/lib/assessment/assessment-engine.test.js';
 
 async function main() {
   console.log('=================================================================');

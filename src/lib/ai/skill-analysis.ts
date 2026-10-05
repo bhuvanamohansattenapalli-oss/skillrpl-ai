@@ -1,5 +1,5 @@
-import { getGeminiClient, getGeminiModel } from './gemini';
-import { prisma } from '../db';
+import { getGeminiClient, getGeminiModel } from './gemini.js';
+import { prisma } from '../db.js';
 import type { Prisma } from '@prisma/client';
 
 export interface SkillItem {
