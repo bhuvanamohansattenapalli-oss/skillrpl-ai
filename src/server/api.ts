@@ -669,7 +669,87 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
   }
 
-  // 7. Auth Sync Profile: POST /api/auth/sync-profile
+  // 7.1 Auth Register: POST /api/auth/register
+  if (pathname === '/api/auth/register') {
+    if (req.method !== 'POST') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use POST.' });
+      return true;
+    }
+
+    try {
+      const rawBody: any = await parseRequestBody(req);
+      const { email, password, role, name, phone, trade, yearsExperience, bio, organization, specialization, assessorRegNumber } = rawBody;
+
+      if (!email || !role) {
+        sendJsonResponse(res, 400, { success: false, error: 'Email and role are required.' });
+        return true;
+      }
+
+      const { registerUserWithCredentials } = await import('./auth.js');
+      const result = await registerUserWithCredentials({
+        email,
+        password,
+        role,
+        name: name || (role === 'ASSESSOR' ? 'Accredited Assessor' : 'Candidate Worker'),
+        phone,
+        trade,
+        yearsExperience,
+        bio,
+        organization,
+        specialization,
+        assessorRegNumber
+      });
+
+      sendJsonResponse(res, 201, {
+        success: true,
+        user: result.user,
+        profile: result.profile,
+        token: result.token,
+        data: result
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Auth Register Error]', err);
+      sendJsonResponse(res, err.status || 500, { success: false, error: err.message || 'Registration failed.' });
+      return true;
+    }
+  }
+
+  // 7.2 Auth Login: POST /api/auth/login
+  if (pathname === '/api/auth/login') {
+    if (req.method !== 'POST') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use POST.' });
+      return true;
+    }
+
+    try {
+      const rawBody: any = await parseRequestBody(req);
+      const { email, password } = rawBody;
+
+      if (!email) {
+        sendJsonResponse(res, 400, { success: false, error: 'Email is required.' });
+        return true;
+      }
+
+      const { loginUserWithCredentials } = await import('./auth.js');
+      const result = await loginUserWithCredentials({ email, password });
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        user: result.user,
+        profile: result.profile,
+        token: result.token,
+        data: result
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Auth Login Error]', err);
+      sendJsonResponse(res, err.status || 401, { success: false, error: err.message || 'Authentication failed.' });
+      return true;
+    }
+  }
+
+  // 7.3 Auth Sync Profile: POST /api/auth/sync-profile
   if (pathname === '/api/auth/sync-profile') {
     if (req.method !== 'POST') {
       sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use POST.' });
@@ -692,11 +772,11 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
 
       let verifiedUserId: string | undefined;
 
-      // If token provided, verify with Supabase Auth
+      // If token provided, verify with unified auth token verification
       if (token) {
         try {
-          const { verifySupabaseToken } = await import('./auth.js');
-          const authUser = await verifySupabaseToken(token);
+          const { verifyAuthToken } = await import('./auth.js');
+          const authUser = await verifyAuthToken(token);
           verifiedUserId = authUser.id;
         } catch (tokenErr) {
           console.warn('[Auth Token Verification Notice]', tokenErr);
@@ -717,6 +797,8 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
 
       sendJsonResponse(res, 200, {
         success: true,
+        user: synced.user,
+        profile: synced.profile,
         data: synced
       });
       return true;
@@ -727,8 +809,8 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
   }
 
-  // 8. Auth Get User Role: GET /api/auth/user-role
-  if (pathname === '/api/auth/user-role') {
+  // 8. Auth Get User Role & Profile: GET /api/auth/user-role or GET /api/auth/me
+  if (pathname === '/api/auth/user-role' || pathname === '/api/auth/me') {
     if (req.method !== 'GET') {
       sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use GET.' });
       return true;
@@ -744,15 +826,17 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
 
       if (token) {
         try {
-          const { verifySupabaseToken } = await import('./auth.js');
-          const authUser = await verifySupabaseToken(token);
+          const { verifyAuthToken } = await import('./auth.js');
+          const authUser = await verifyAuthToken(token);
           if (authUser?.email) {
             user = await prisma.user.findFirst({
               where: { email: authUser.email.toLowerCase() },
               include: { workerProfile: true, assessorProfile: true }
             });
           }
-        } catch {}
+        } catch (tErr) {
+          console.warn('[Auth Verify Token Notice]', tErr);
+        }
       }
 
       if (!user && email) {
@@ -767,13 +851,21 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
+      const activeProfile = user.role === 'ASSESSOR' ? user.assessorProfile : user.workerProfile;
+
       sendJsonResponse(res, 200, {
         success: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          role: user.role
+        },
+        profile: activeProfile,
         data: {
           id: user.id,
           email: user.email,
           role: user.role,
-          profile: user.role === 'ASSESSOR' ? user.assessorProfile : user.workerProfile
+          profile: activeProfile
         }
       });
       return true;
@@ -927,8 +1019,8 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
 
     try {
-      const { verifySupabaseToken } = await import('./auth.js');
-      const authUser = await verifySupabaseToken(token);
+      const { verifyAuthToken } = await import('./auth.js');
+      const authUser = await verifyAuthToken(token);
       if (!authUser || !authUser.email) {
         const err: any = new Error('Invalid authentication session.');
         err.status = 401;
@@ -946,7 +1038,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
           userId: authUser.id,
           email: authUser.email.toLowerCase(),
           role: 'WORKER',
-          name: (authUser.user_metadata?.full_name || authUser.user_metadata?.name || 'Worker Candidate') as string
+          name: ((authUser as any).user_metadata?.full_name || (authUser as any).user_metadata?.name || 'Worker Candidate') as string
         });
         user = await prisma.user.findFirst({
           where: { email: authUser.email.toLowerCase() },
@@ -1689,8 +1781,8 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     const { prisma } = await import('../lib/db.js');
 
     if (token) {
-      const { verifySupabaseToken } = await import('./auth.js');
-      const authUser = await verifySupabaseToken(token);
+      const { verifyAuthToken } = await import('./auth.js');
+      const authUser = await verifyAuthToken(token);
       if (authUser?.email) {
         let user = await prisma.user.findFirst({
           where: { email: authUser.email.toLowerCase() },

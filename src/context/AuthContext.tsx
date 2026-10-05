@@ -68,22 +68,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.user) {
-          const userRole = (data.user.role as UserRoleType) || 'WORKER';
+        const userData = data.user || data.data;
+        const profileData = data.profile || data.data?.profile;
+        if (userData) {
+          const userRole = (userData.role as UserRoleType) || 'WORKER';
           setRole(userRole);
-          const p = data.profile;
           setProfile({
-            id: data.user.id,
-            name: p?.name || data.user.email?.split('@')[0] || 'User',
-            email: data.user.email,
+            id: userData.id,
+            name: profileData?.name || userData.email?.split('@')[0] || 'User',
+            email: userData.email,
             role: userRole,
-            phone: p?.phone,
-            trade: p?.trade,
-            bio: p?.bio,
-            organization: p?.organization,
-            specialization: p?.tradeSpecialization,
-            assessorRegNumber: p?.assessorRegNumber,
-            yearsExperience: p?.yearsOfExperience
+            phone: profileData?.phone,
+            trade: profileData?.trade,
+            bio: profileData?.bio,
+            organization: profileData?.organization,
+            specialization: profileData?.tradeSpecialization || profileData?.specialization,
+            assessorRegNumber: profileData?.assessorRegNumber,
+            yearsExperience: profileData?.yearsOfExperience || profileData?.yearsExperience
           });
           return userRole;
         }
@@ -94,188 +95,300 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return null;
   };
 
-  // Sync profile with database via backend API
-  const syncServerProfile = async (accessToken: string, profileData: SignUpProfileData): Promise<UserRoleType | null> => {
-    try {
-      const res = await fetch('/api/auth/sync-profile', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`
-        },
-        body: JSON.stringify(profileData)
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.user) {
-          const userRole = (data.user.role as UserRoleType) || profileData.role;
-          setRole(userRole);
-          const p = data.profile;
-          setProfile({
-            id: data.user.id,
-            name: p?.name || profileData.name,
-            email: data.user.email,
-            role: userRole,
-            phone: p?.phone || profileData.phone,
-            trade: p?.trade || profileData.trade,
-            bio: p?.bio || profileData.bio,
-            organization: p?.organization || profileData.organization,
-            specialization: p?.tradeSpecialization || profileData.specialization,
-            assessorRegNumber: p?.assessorRegNumber,
-            yearsExperience: p?.yearsOfExperience || profileData.yearsExperience
-          });
-          return userRole;
-        }
-      }
-    } catch (err) {
-      console.error('[AuthContext] Error syncing profile:', err);
-    }
-    return null;
-  };
-
   // Initial session check & auth state change listener
   useEffect(() => {
     let mounted = true;
 
-    // Check if demo user is stored in localStorage
-    const savedDemoUser = localStorage.getItem('skillrpl_demo_user');
-    if (savedDemoUser) {
-      try {
-        const parsed = JSON.parse(savedDemoUser);
-        if (parsed?.role) {
-          setRole(parsed.role);
-          setProfile(parsed);
-          setUser({ id: parsed.id, email: parsed.email } as any);
-          setLoading(false);
-          return;
+    const restoreSession = async () => {
+      // 1. Check if demo user is stored in localStorage
+      const savedDemoUser = localStorage.getItem('skillrpl_demo_user');
+      if (savedDemoUser) {
+        try {
+          const parsed = JSON.parse(savedDemoUser);
+          if (parsed?.role) {
+            setRole(parsed.role);
+            setProfile(parsed);
+            setUser({ id: parsed.id, email: parsed.email } as any);
+            setLoading(false);
+            return;
+          }
+        } catch (e) {
+          localStorage.removeItem('skillrpl_demo_user');
         }
-      } catch (e) {
-        localStorage.removeItem('skillrpl_demo_user');
       }
+
+      // 2. Check if local JWT / session token is stored
+      const savedToken = localStorage.getItem('skillrpl_auth_token');
+      const savedUserStr = localStorage.getItem('skillrpl_auth_user');
+      if (savedToken) {
+        try {
+          const res = await fetch('/api/auth/user-role', {
+            headers: { 'Authorization': `Bearer ${savedToken}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const u = data.user || data.data;
+            const p = data.profile || data.data?.profile;
+            if (u && mounted) {
+              const uRole = (u.role as UserRoleType) || 'WORKER';
+              setRole(uRole);
+              setUser({ id: u.id, email: u.email } as any);
+              setSession({ access_token: savedToken } as any);
+              setProfile({
+                id: u.id,
+                name: p?.name || u.email?.split('@')[0] || 'User',
+                email: u.email,
+                role: uRole,
+                phone: p?.phone,
+                trade: p?.trade,
+                bio: p?.bio,
+                organization: p?.organization,
+                specialization: p?.tradeSpecialization,
+                assessorRegNumber: p?.assessorRegNumber,
+                yearsExperience: p?.yearsOfExperience
+              });
+              setLoading(false);
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('[AuthContext] Saved token validation failed:', err);
+        }
+      }
+
+      // Fallback: Restore cached user data if available
+      if (savedUserStr && mounted) {
+        try {
+          const parsed = JSON.parse(savedUserStr);
+          if (parsed?.user) {
+            setUser(parsed.user);
+            setRole(parsed.role || parsed.user.role);
+            setProfile(parsed.profile);
+            setLoading(false);
+            return;
+          }
+        } catch {}
+      }
+
+      // 3. Check Supabase session if available
+      if (supabase) {
+        try {
+          const { data: { session: currentSession } } = await supabase.auth.getSession();
+          if (currentSession && mounted) {
+            setSession(currentSession);
+            setUser(currentSession.user ?? null);
+            if (currentSession.access_token) {
+              await fetchServerProfile(currentSession.access_token);
+            }
+          }
+        } catch {}
+      }
+
+      if (mounted) setLoading(false);
+    };
+
+    restoreSession();
+
+    if (supabase) {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
+        if (!mounted) return;
+        if (newSession) {
+          setSession(newSession);
+          setUser(newSession.user ?? null);
+          if (newSession.access_token) {
+            await fetchServerProfile(newSession.access_token);
+          }
+        } else if (event === 'SIGNED_OUT') {
+          if (!localStorage.getItem('skillrpl_auth_token')) {
+            setRole(null);
+            setProfile(null);
+            setUser(null);
+            setSession(null);
+          }
+        }
+      });
+
+      return () => {
+        mounted = false;
+        subscription.unsubscribe();
+      };
     }
-
-    if (!supabase) {
-      setLoading(false);
-      return;
-    }
-
-    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
-      if (!mounted) return;
-      setSession(currentSession);
-      setUser(currentSession?.user ?? null);
-      if (currentSession?.access_token) {
-        fetchServerProfile(currentSession.access_token).finally(() => {
-          if (mounted) setLoading(false);
-        });
-      } else {
-        setLoading(false);
-      }
-    });
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
-      if (!mounted) return;
-      setSession(newSession);
-      setUser(newSession?.user ?? null);
-      if (newSession?.access_token) {
-        await fetchServerProfile(newSession.access_token);
-      } else if (event === 'SIGNED_OUT') {
-        setRole(null);
-        setProfile(null);
-      }
-    });
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
     };
   }, []);
 
   const signInWithEmail = async (email: string, password: string): Promise<{ success: boolean; role?: UserRoleType; error?: string }> => {
     setError(null);
-    if (!supabase) {
-      setError('Supabase client not initialized. Check your environment variables.');
-      return { success: false, error: 'Supabase client not configured.' };
-    }
 
+    // 1. Authenticate with backend database endpoint first
     try {
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password })
       });
 
-      if (signInError) {
-        setError(signInError.message);
-        return { success: false, error: signInError.message };
+      const data = await res.json();
+
+      if (res.ok && data.success && data.user) {
+        const userRole = (data.user.role as UserRoleType) || 'WORKER';
+        const userProfile: UserProfileData = {
+          id: data.user.id,
+          name: data.profile?.name || data.user.email.split('@')[0],
+          email: data.user.email,
+          role: userRole,
+          phone: data.profile?.phone,
+          trade: data.profile?.trade,
+          bio: data.profile?.bio,
+          organization: data.profile?.organization,
+          specialization: data.profile?.tradeSpecialization || data.profile?.specialization,
+          assessorRegNumber: data.profile?.assessorRegNumber,
+          yearsExperience: data.profile?.yearsOfExperience || data.profile?.yearsExperience
+        };
+
+        setRole(userRole);
+        setProfile(userProfile);
+        setUser({ id: data.user.id, email: data.user.email } as any);
+        if (data.token) {
+          setSession({ access_token: data.token } as any);
+          localStorage.setItem('skillrpl_auth_token', data.token);
+        }
+        localStorage.setItem('skillrpl_auth_user', JSON.stringify({ user: data.user, profile: userProfile, role: userRole }));
+        localStorage.removeItem('skillrpl_demo_user');
+
+        // Optional background Supabase sign in if configured
+        if (supabase) {
+          try {
+            await supabase.auth.signInWithPassword({ email: email.trim(), password });
+          } catch {}
+        }
+
+        return { success: true, role: userRole };
       }
 
-      if (data.session) {
-        setSession(data.session);
-        setUser(data.user);
-        const serverRole = await fetchServerProfile(data.session.access_token);
-        return { success: true, role: serverRole || 'WORKER' };
+      if (data.error) {
+        setError(data.error);
+        return { success: false, error: data.error };
       }
-
-      return { success: true, role: 'WORKER' };
-    } catch (err: any) {
-      const msg = err?.message || 'Login failed. Please try again.';
-      setError(msg);
-      return { success: false, error: msg };
+    } catch (apiErr) {
+      console.warn('[Auth Login API Error, trying Supabase fallback]', apiErr);
     }
+
+    // 2. Fallback to Supabase Auth if API failed
+    if (supabase) {
+      try {
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password
+        });
+
+        if (signInError) {
+          setError(signInError.message);
+          return { success: false, error: signInError.message };
+        }
+
+        if (data.session) {
+          setSession(data.session);
+          setUser(data.user);
+          localStorage.setItem('skillrpl_auth_token', data.session.access_token);
+          const serverRole = await fetchServerProfile(data.session.access_token);
+          return { success: true, role: serverRole || 'WORKER' };
+        }
+      } catch (sbErr: any) {
+        const msg = sbErr?.message || 'Login failed. Please verify credentials.';
+        setError(msg);
+        return { success: false, error: msg };
+      }
+    }
+
+    setError('Invalid email or password.');
+    return { success: false, error: 'Invalid email or password.' };
   };
 
   const signUpWithEmail = async (email: string, password: string, profileData: SignUpProfileData): Promise<{ success: boolean; role?: UserRoleType; error?: string }> => {
     setError(null);
-    if (!supabase) {
-      setError('Supabase client not initialized.');
-      return { success: false, error: 'Supabase client not configured.' };
-    }
 
     try {
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email: email.trim(),
-        password,
-        options: {
-          data: {
-            name: profileData.name,
-            role: profileData.role
-          }
-        }
+      // 1. Register with backend database API
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password,
+          role: profileData.role,
+          name: profileData.name,
+          phone: profileData.phone,
+          trade: profileData.trade,
+          yearsExperience: profileData.yearsExperience,
+          bio: profileData.bio,
+          organization: profileData.organization,
+          specialization: profileData.specialization,
+          assessorRegNumber: (profileData as any).assessorRegNumber
+        })
       });
 
-      if (signUpError) {
-        setError(signUpError.message);
-        return { success: false, error: signUpError.message };
-      }
+      const data = await res.json();
 
-      // If session is immediately available (or autoconfirmed)
-      if (data.session) {
-        setSession(data.session);
-        setUser(data.user);
-        const syncedRole = await syncServerProfile(data.session.access_token, profileData);
-        return { success: true, role: syncedRole || profileData.role };
-      }
-
-      // If email confirmation is required by Supabase project settings
-      if (data.user && !data.session) {
-        return {
-          success: true,
-          role: profileData.role,
-          error: 'Account created! Please check your email to confirm your account, then log in.'
+      if (res.ok && data.success && data.user) {
+        const userRole = (data.user.role as UserRoleType) || profileData.role;
+        const userProfile: UserProfileData = {
+          id: data.user.id,
+          name: data.profile?.name || profileData.name,
+          email: data.user.email,
+          role: userRole,
+          phone: data.profile?.phone || profileData.phone,
+          trade: data.profile?.trade || profileData.trade,
+          bio: data.profile?.bio || profileData.bio,
+          organization: data.profile?.organization || profileData.organization,
+          specialization: data.profile?.tradeSpecialization || profileData.specialization,
+          assessorRegNumber: data.profile?.assessorRegNumber,
+          yearsExperience: data.profile?.yearsOfExperience || profileData.yearsExperience
         };
+
+        setRole(userRole);
+        setProfile(userProfile);
+        setUser({ id: data.user.id, email: data.user.email } as any);
+        if (data.token) {
+          setSession({ access_token: data.token } as any);
+          localStorage.setItem('skillrpl_auth_token', data.token);
+        }
+        localStorage.setItem('skillrpl_auth_user', JSON.stringify({ user: data.user, profile: userProfile, role: userRole }));
+        localStorage.removeItem('skillrpl_demo_user');
+
+        // Optional background Supabase sign up
+        if (supabase) {
+          try {
+            await supabase.auth.signUp({
+              email: email.trim(),
+              password,
+              options: { data: { name: profileData.name, role: profileData.role } }
+            });
+          } catch {}
+        }
+
+        return { success: true, role: userRole };
       }
 
-      return { success: true, role: profileData.role };
+      if (data.error) {
+        setError(data.error);
+        return { success: false, error: data.error };
+      }
     } catch (err: any) {
-      const msg = err?.message || 'Signup failed. Please try again.';
+      const msg = err?.message || 'Registration failed. Please try again.';
       setError(msg);
       return { success: false, error: msg };
     }
+
+    return { success: false, error: 'Registration could not be completed.' };
   };
 
   const signInWithGoogle = async () => {
     setError(null);
     if (!supabase) {
-      setError('Supabase client not initialized.');
+      setError('Google sign-in is currently unavailable.');
       return;
     }
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
@@ -291,6 +404,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const demoSignIn = async (targetRole: 'WORKER' | 'ASSESSOR') => {
     setError(null);
+    localStorage.removeItem('skillrpl_auth_token');
+    localStorage.removeItem('skillrpl_auth_user');
+
     const demoData: UserProfileData = targetRole === 'WORKER'
       ? {
           id: 'demo-worker-001',
@@ -322,8 +438,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const signOut = async () => {
     localStorage.removeItem('skillrpl_demo_user');
+    localStorage.removeItem('skillrpl_auth_token');
+    localStorage.removeItem('skillrpl_auth_user');
     if (supabase) {
-      await supabase.auth.signOut();
+      try {
+        await supabase.auth.signOut();
+      } catch {}
     }
     setUser(null);
     setSession(null);
@@ -332,8 +452,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const refreshProfile = async () => {
-    if (session?.access_token) {
-      await fetchServerProfile(session.access_token);
+    const token = session?.access_token || localStorage.getItem('skillrpl_auth_token');
+    if (token) {
+      await fetchServerProfile(token);
     }
   };
 

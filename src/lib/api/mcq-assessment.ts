@@ -92,20 +92,32 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
   };
+
+  // 1. Check local session token
+  if (typeof window !== 'undefined') {
+    const localToken = localStorage.getItem('skillrpl_auth_token');
+    if (localToken) {
+      headers['Authorization'] = `Bearer ${localToken}`;
+      return headers;
+    }
+  }
+
+  // 2. Check Supabase token
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
       const { data } = await supabase.auth.getSession();
       if (data?.session?.access_token) {
         headers['Authorization'] = `Bearer ${data.session.access_token}`;
+        return headers;
       }
     }
   } catch {
     // Non-blocking
   }
 
-  // If no Supabase Bearer token, check for demo user session in localStorage
-  if (!headers['Authorization'] && typeof window !== 'undefined') {
+  // 3. If no Bearer token, check for demo user session in localStorage
+  if (typeof window !== 'undefined') {
     try {
       const savedDemoUser = localStorage.getItem('skillrpl_demo_user');
       if (savedDemoUser) {
