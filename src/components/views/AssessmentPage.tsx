@@ -771,13 +771,25 @@ export const AssessmentPage: React.FC = () => {
                       <div>
                         <span>{submittedDateStr}</span> • <span>{formatTimer(att.timeSpentSeconds || 0)}</span>
                       </div>
-                      <GlassButton
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => handleViewPastAttempt(att.id)}
-                      >
-                        View Review <ChevronRight size={14} />
-                      </GlassButton>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        {(att.assessorDecision === 'ACCEPT_FURTHER_ASSESSMENT' || att.percentage >= 70) && (
+                          <GlassButton
+                            variant="teal"
+                            size="sm"
+                            onClick={() => setCurrentView('certificate')}
+                          >
+                            <Award size={13} />
+                            <span>Certificate</span>
+                          </GlassButton>
+                        )}
+                        <GlassButton
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleViewPastAttempt(att.id)}
+                        >
+                          View Review <ChevronRight size={14} />
+                        </GlassButton>
+                      </div>
                     </div>
                   </GlassCard>
                 );
@@ -1122,7 +1134,13 @@ export const AssessmentPage: React.FC = () => {
             </p>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <GlassButton
+              variant="teal"
+              onClick={() => setCurrentView('certificate')}
+            >
+              <Award size={16} /> View Certificate
+            </GlassButton>
             <GlassButton
               variant="secondary"
               onClick={() => {

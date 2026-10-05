@@ -19,6 +19,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { fetchWorkerApplications, submitWorkerApplication } from '../../lib/api/worker-application';
+import { fetchWorkerCertificates, type CertificateData } from '../../lib/api/certificate';
 import type { RPLApplicationListItem } from '../../types';
 import heroImg from '../../assets/taj_mahal_hero.jpg';
 import nightImg from '../../assets/taj_mahal_night.jpg';
@@ -56,6 +57,7 @@ export const WorkerDashboard: React.FC = () => {
   const [applications, setApplications] = useState<RPLApplicationListItem[]>([]);
   const [loadingApps, setLoadingApps] = useState(true);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
+  const [certificates, setCertificates] = useState<CertificateData[]>([]);
 
   const loadApplications = async () => {
     setLoadingApps(true);
@@ -71,8 +73,18 @@ export const WorkerDashboard: React.FC = () => {
     }
   };
 
+  const loadCertificates = async () => {
+    try {
+      const list = await fetchWorkerCertificates();
+      setCertificates(list);
+    } catch (err) {
+      console.warn('Failed to load worker certificates:', err);
+    }
+  };
+
   useEffect(() => {
     loadApplications();
+    loadCertificates();
   }, [session?.access_token]);
 
   const handleSubmitApplication = async (appId: string) => {
@@ -519,6 +531,89 @@ export const WorkerDashboard: React.FC = () => {
       >
         {/* LEFT COLUMN: RPL Journey + Popular Skill Categories */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* Certificate & Assessment Completed Card */}
+          {certificates.length > 0 && (
+            <div
+              style={{
+                background: 'linear-gradient(135deg, rgba(240, 253, 250, 0.95) 0%, rgba(255, 255, 255, 0.98) 100%)',
+                border: '1.5px solid rgba(13, 148, 136, 0.35)',
+                borderRadius: '22px',
+                padding: '22px 26px',
+                boxShadow: '0 8px 24px rgba(13, 148, 136, 0.12)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '16px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <div
+                  style={{
+                    width: '52px',
+                    height: '52px',
+                    borderRadius: '14px',
+                    background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 4px 12px rgba(13, 148, 136, 0.25)',
+                    flexShrink: 0
+                  }}
+                >
+                  <Award size={28} />
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <h4 style={{ fontSize: '16.5px', fontWeight: 800, color: '#0f2744', margin: 0 }}>
+                      Assessment Completed · Score: {certificates[0].score}/{certificates[0].totalScore} ({certificates[0].percentage}%)
+                    </h4>
+                    <span
+                      style={{
+                        background: '#dcfce7',
+                        color: '#15803d',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        padding: '2px 8px',
+                        borderRadius: '999px',
+                        border: '1px solid #bbf7d0'
+                      }}
+                    >
+                      Certificate Available
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '13px', color: '#475569', margin: '4px 0 0' }}>
+                    Trade: <strong>{certificates[0].trade}</strong> · Approved by {certificates[0].assessorName || 'Accredited Assessor'} ({certificates[0].certificateNumber})
+                  </p>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button
+                  onClick={() => setCurrentView('certificate')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '10px 20px',
+                    borderRadius: '12px',
+                    background: 'linear-gradient(135deg, #0d9488 0%, #059669 100%)',
+                    color: '#ffffff',
+                    fontSize: '13.5px',
+                    fontWeight: 700,
+                    border: 'none',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(13, 148, 136, 0.3)'
+                  }}
+                >
+                  <Award size={16} />
+                  <span>View Certificate</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Card: My RPL Applications */}
           <div
             style={{
@@ -1359,7 +1454,7 @@ export const WorkerDashboard: React.FC = () => {
 
             {/* Action 2: View My Certificates */}
             <div
-              onClick={() => setCurrentView('results')}
+              onClick={() => setCurrentView('certificate')}
               style={{
                 display: 'flex',
                 alignItems: 'center',

@@ -47,7 +47,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
     if (key === 'qualification-match') return currentView === 'qualification-match';
     if (key === 'skill-assessment') return currentView === 'assessment';
     if (key === 'my-assessments') return currentView === 'declaration' || currentView === 'evidence';
-    if (key === 'certification') return currentView === 'results';
+    if (key === 'certification') return currentView === 'results' || currentView === 'certificate';
     return false;
   };
 
@@ -386,12 +386,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
 
         {/* 5. Certification */}
         <button
-          onClick={() => navigateTo('results')}
+          onClick={() => navigateTo('certificate')}
           style={navItemStyle(isItemActive('certification'))}
           className="sidebar-btn"
         >
           <Award size={18} color={isItemActive('certification') ? '#FFFFFF' : '#9cb3cf'} />
-          <span>Certification</span>
+          <span>My Certificate</span>
         </button>
 
         {/* 6. Job Opportunities */}

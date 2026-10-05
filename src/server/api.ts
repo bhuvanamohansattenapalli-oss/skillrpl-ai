@@ -3240,11 +3240,22 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const attempts = await prisma.assessmentAttempt.findMany({
+      let attempts = await prisma.assessmentAttempt.findMany({
         where: { workerProfileId },
         orderBy: { createdAt: 'desc' },
         take: 20
       });
+
+      // If demo candidate has no attempts yet, ensure persistent demo data is seeded
+      if (attempts.length === 0) {
+        const { seedPersistentDemoData } = await import('./seed-qualifications.js');
+        await seedPersistentDemoData();
+        attempts = await prisma.assessmentAttempt.findMany({
+          where: { workerProfileId },
+          orderBy: { createdAt: 'desc' },
+          take: 20
+        });
+      }
 
       sendJsonResponse(res, 200, { success: true, attempts });
       return true;
@@ -3291,13 +3302,76 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
           assessorNotes: body.notes?.trim() || null,
           assessorReviewedAt: new Date(),
           assessorId: body.assessorId || null
+        },
+        include: {
+          workerProfile: true
         }
       });
+
+      let issuedCertificate: any = null;
+
+      // If approved with ACCEPT_FURTHER_ASSESSMENT, auto-issue certificate if not already issued
+      if (body.decision === 'ACCEPT_FURTHER_ASSESSMENT' && updated.status === 'COMPLETED') {
+        const existingCert = await prisma.certificate.findFirst({
+          where: { assessmentAttemptId: updated.id }
+        });
+
+        if (existingCert) {
+          issuedCertificate = existingCert;
+        } else {
+          const certNum = `SKILLRPL-CERT-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+          let assessorName = 'Dr. Vikramaditya Sharma';
+          let assessorId = body.assessorId || 'ASSESS-NSDC-2024-8842';
+
+          if (body.assessorId) {
+            const assessor = await prisma.assessorProfile.findUnique({
+              where: { id: body.assessorId }
+            });
+            if (assessor) {
+              assessorName = assessor.name;
+              assessorId = assessor.assessorRegNumber || assessor.id;
+            }
+          }
+
+          issuedCertificate = await prisma.certificate.create({
+            data: {
+              certificateNumber: certNum,
+              workerProfileId: updated.workerProfileId,
+              assessmentAttemptId: updated.id,
+              workerName: updated.workerProfile.name,
+              workerIdentifier: `WP-${updated.workerProfile.id.substring(0, 8).toUpperCase()}`,
+              trade: updated.trade || updated.topic,
+              assessmentName: `${updated.topic} RPL Assessment`,
+              score: updated.score,
+              totalScore: updated.totalQuestions || 10,
+              percentage: updated.percentage,
+              nsqfLevel: 4,
+              qualificationPack: updated.topic === 'Electrician'
+                ? 'Assistant Electrician (ELE/Q0101)'
+                : `${updated.topic} Competency Pack`,
+              assessorName,
+              assessorId,
+              assessorDesignation: 'CSDCI / NCVET Accredited Lead Assessor',
+              assessmentCompletedAt: updated.submittedAt || new Date(),
+              issuedAt: new Date(),
+              status: 'ISSUED',
+              isDemo: updated.workerProfile.email?.includes('skillrpl.gov.in') || false,
+              verificationCode: `VERIF-RPL-2026-${updated.id.substring(0, 8).toUpperCase()}`,
+              metadata: {
+                categoryScores: updated.categoryScores,
+                assessorNotes: updated.assessorNotes,
+                systemIndicator: updated.systemIndicator
+              }
+            }
+          });
+        }
+      }
 
       sendJsonResponse(res, 200, {
         success: true,
         message: `Assessor action recorded: ${body.decision}`,
-        attempt: updated
+        attempt: updated,
+        certificate: issuedCertificate
       });
       return true;
     } catch (err: any) {
@@ -3316,6 +3390,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
           workerProfile: {
             select: { id: true, name: true, email: true, trade: true, phone: true }
           },
+          certificate: true,
           _count: {
             select: { questions: true, answers: true }
           }
@@ -3367,7 +3442,232 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
   }
 
+  // =========================================================================
+  // 14. CERTIFICATE GENERATION & VERIFICATION (RPL PHASE 4.2)
+  // =========================================================================
+
+  // 14.1 Get Certificate Details: GET /api/certificate?attemptId=... or ?certNum=... or ?id=...
+  if (pathname === '/api/certificate' && req.method === 'GET') {
+    try {
+      const attemptId = parsedUrl.searchParams.get('attemptId');
+      const certNum = parsedUrl.searchParams.get('certNum');
+      const id = parsedUrl.searchParams.get('id');
+      const { prisma } = await import('../lib/db.js');
+
+      let certificate: any = null;
+
+      if (id) {
+        certificate = await prisma.certificate.findUnique({
+          where: { id },
+          include: { workerProfile: true, assessmentAttempt: true }
+        });
+      } else if (certNum) {
+        certificate = await prisma.certificate.findUnique({
+          where: { certificateNumber: certNum },
+          include: { workerProfile: true, assessmentAttempt: true }
+        });
+      } else if (attemptId) {
+        certificate = await prisma.certificate.findFirst({
+          where: { assessmentAttemptId: attemptId },
+          include: { workerProfile: true, assessmentAttempt: true }
+        });
+
+        // If certificate doesn't exist yet but attempt is approved, auto-generate
+        if (!certificate) {
+          const attempt = await prisma.assessmentAttempt.findUnique({
+            where: { id: attemptId },
+            include: { workerProfile: true }
+          });
+
+          if (attempt && attempt.status === 'COMPLETED' && (attempt.assessorDecision === 'ACCEPT_FURTHER_ASSESSMENT' || attempt.percentage >= 70)) {
+            const newCertNum = `SKILLRPL-CERT-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+            certificate = await prisma.certificate.create({
+              data: {
+                certificateNumber: newCertNum,
+                workerProfileId: attempt.workerProfileId,
+                assessmentAttemptId: attempt.id,
+                workerName: attempt.workerProfile.name,
+                workerIdentifier: `WP-${attempt.workerProfile.id.substring(0, 8).toUpperCase()}`,
+                trade: attempt.trade || attempt.topic,
+                assessmentName: `${attempt.topic} RPL Assessment`,
+                score: attempt.score,
+                totalScore: attempt.totalQuestions || 10,
+                percentage: attempt.percentage,
+                nsqfLevel: 4,
+                qualificationPack: attempt.topic === 'Electrician'
+                  ? 'Assistant Electrician (ELE/Q0101)'
+                  : `${attempt.topic} Competency Pack`,
+                assessorName: 'Dr. Vikramaditya Sharma',
+                assessorId: 'ASSESS-NSDC-2024-8842',
+                assessorDesignation: 'CSDCI / NCVET Accredited Lead Assessor',
+                assessmentCompletedAt: attempt.submittedAt || new Date(),
+                issuedAt: new Date(),
+                status: 'ISSUED',
+                isDemo: attempt.workerProfile.email?.includes('skillrpl.gov.in') || false,
+                verificationCode: `VERIF-RPL-2026-${attempt.id.substring(0, 8).toUpperCase()}`
+              },
+              include: { workerProfile: true, assessmentAttempt: true }
+            });
+          }
+        }
+      }
+
+      if (!certificate) {
+        sendJsonResponse(res, 404, { success: false, error: 'Certificate not found.' });
+        return true;
+      }
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        certificate
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Get Certificate Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to fetch certificate.' });
+      return true;
+    }
+  }
+
+  // 14.2 Get Worker Certificates: GET /api/certificate/worker
+  if (pathname === '/api/certificate/worker' && req.method === 'GET') {
+    try {
+      const { prisma } = await import('../lib/db.js');
+      let workerProfileId = parsedUrl.searchParams.get('workerProfileId');
+
+      if (!workerProfileId) {
+        try {
+          const auth = await resolveAuthenticatedWorker(req);
+          workerProfileId = auth.workerProfile.id;
+        } catch {
+          const firstWorker = await prisma.workerProfile.findFirst();
+          workerProfileId = firstWorker?.id || null;
+        }
+      }
+
+      if (!workerProfileId) {
+        sendJsonResponse(res, 200, { success: true, certificates: [], latestCertificate: null });
+        return true;
+      }
+
+      let certificates = await prisma.certificate.findMany({
+        where: { workerProfileId },
+        orderBy: { issuedAt: 'desc' }
+      });
+
+      // If no certificates found, check if persistent demo data needs to be seeded
+      if (certificates.length === 0) {
+        const { seedPersistentDemoData } = await import('./seed-qualifications.js');
+        await seedPersistentDemoData();
+        certificates = await prisma.certificate.findMany({
+          where: { workerProfileId },
+          orderBy: { issuedAt: 'desc' }
+        });
+      }
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        certificates,
+        latestCertificate: certificates.length > 0 ? certificates[0] : null
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Worker Certificates Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to fetch worker certificates.' });
+      return true;
+    }
+  }
+
+  // 14.3 Generate/Issue Certificate: POST /api/certificate/generate
+  if (pathname === '/api/certificate/generate' && req.method === 'POST') {
+    try {
+      const body = (await parseRequestBody(req)) as {
+        attemptId?: string;
+        assessorId?: string;
+        assessorName?: string;
+        notes?: string;
+      };
+
+      if (!body.attemptId) {
+        sendJsonResponse(res, 400, { success: false, error: 'attemptId is required.' });
+        return true;
+      }
+
+      const { prisma } = await import('../lib/db.js');
+
+      const attempt = await prisma.assessmentAttempt.findUnique({
+        where: { id: body.attemptId },
+        include: { workerProfile: true }
+      });
+
+      if (!attempt) {
+        sendJsonResponse(res, 404, { success: false, error: 'Assessment attempt not found.' });
+        return true;
+      }
+
+      if (attempt.status !== 'COMPLETED') {
+        sendJsonResponse(res, 400, {
+          success: false,
+          error: 'Certificate can only be issued for COMPLETED assessment attempts.'
+        });
+        return true;
+      }
+
+      // Check if already issued
+      let certificate = await prisma.certificate.findFirst({
+        where: { assessmentAttemptId: attempt.id }
+      });
+
+      if (!certificate) {
+        const certNum = `SKILLRPL-CERT-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+        certificate = await prisma.certificate.create({
+          data: {
+            certificateNumber: certNum,
+            workerProfileId: attempt.workerProfileId,
+            assessmentAttemptId: attempt.id,
+            workerName: attempt.workerProfile.name,
+            workerIdentifier: `WP-${attempt.workerProfile.id.substring(0, 8).toUpperCase()}`,
+            trade: attempt.trade || attempt.topic,
+            assessmentName: `${attempt.topic} RPL Assessment`,
+            score: attempt.score,
+            totalScore: attempt.totalQuestions || 10,
+            percentage: attempt.percentage,
+            nsqfLevel: 4,
+            qualificationPack: attempt.topic === 'Electrician'
+              ? 'Assistant Electrician (ELE/Q0101)'
+              : `${attempt.topic} Competency Pack`,
+            assessorName: body.assessorName || 'Dr. Vikramaditya Sharma',
+            assessorId: body.assessorId || 'ASSESS-NSDC-2024-8842',
+            assessorDesignation: 'CSDCI / NCVET Accredited Lead Assessor',
+            assessmentCompletedAt: attempt.submittedAt || new Date(),
+            issuedAt: new Date(),
+            status: 'ISSUED',
+            isDemo: attempt.workerProfile.email?.includes('skillrpl.gov.in') || false,
+            verificationCode: `VERIF-RPL-2026-${attempt.id.substring(0, 8).toUpperCase()}`,
+            metadata: {
+              categoryScores: attempt.categoryScores,
+              assessorNotes: body.notes || attempt.assessorNotes,
+              systemIndicator: attempt.systemIndicator
+            }
+          }
+        });
+      }
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        message: `Certificate ${certificate.certificateNumber} issued successfully.`,
+        certificate
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Generate Certificate Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to generate certificate.' });
+      return true;
+    }
+  }
+
   return false;
 }
+
 
 

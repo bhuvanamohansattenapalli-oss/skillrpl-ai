@@ -3,7 +3,6 @@ import {
   Award,
   CheckCircle2,
   AlertTriangle,
-  Download,
   BookOpen,
   Calendar,
   ShieldCheck,
@@ -16,7 +15,7 @@ import { GlassProgress } from '../common/GlassProgress';
 import { useApp } from '../../context/AppContext';
 
 export const ResultPage: React.FC = () => {
-  const { candidate, skillResults, showToast } = useApp();
+  const { candidate, skillResults, showToast, setCurrentView } = useApp();
 
   const getCompetencyBadge = (level: string) => {
     switch (level) {
@@ -80,11 +79,11 @@ export const ResultPage: React.FC = () => {
 
         <div style={{ display: 'flex', gap: '10px' }}>
           <GlassButton
-            variant="secondary"
-            icon={<Download size={16} />}
-            onClick={() => showToast('Downloading Official RPL Competency Certificate PDF...', 'info')}
+            variant="primary"
+            icon={<Award size={16} />}
+            onClick={() => setCurrentView('certificate')}
           >
-            Download PDF
+            View Official Certificate
           </GlassButton>
         </div>
       </GlassCard>
@@ -412,9 +411,10 @@ export const ResultPage: React.FC = () => {
             <GlassButton
               size="sm"
               variant="teal"
-              onClick={() => showToast('Credential preview ready for download.', 'success')}
+              icon={<Award size={14} />}
+              onClick={() => setCurrentView('certificate')}
             >
-              Preview Digital Certificate
+              View Official Certificate
             </GlassButton>
           </div>
         </div>

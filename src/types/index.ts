@@ -15,6 +15,7 @@ export type AppView =
   | 'practical-assessment'
   | 'assessor-analytics'
   | 'results'
+  | 'certificate'
   | 'assessor-dashboard'
   | 'assessor-candidate'
   | 'settings';

@@ -27,6 +27,7 @@ import { AssessorCandidateView } from '../views/AssessorCandidateView';
 import { PracticalAssessmentView } from '../views/PracticalAssessmentView';
 import { AssessorAnalyticsView } from '../views/AssessorAnalyticsView';
 import { ResultPage } from '../views/ResultPage';
+import { CertificatePage } from '../views/CertificatePage';
 import { SettingsPage } from '../views/SettingsPage';
 import { LoginPage } from '../views/LoginPage';
 import { SignupPage } from '../views/SignupPage';
@@ -188,6 +189,8 @@ export const AppShell: React.FC = () => {
         return <AssessorAnalyticsView />;
       case 'results':
         return <ResultPage />;
+      case 'certificate':
+        return <CertificatePage />;
       case 'assessor-dashboard':
         return <AssessorDashboard />;
       case 'assessor-candidate':

@@ -123,6 +123,7 @@ model WorkerProfile {
   rplApplications     RPLApplication[]
   aiConversations     AIConversation[]
   assessmentAttempts  AssessmentAttempt[]
+  certificates        Certificate[]
 
   @@map("worker_profiles")
 }
@@ -552,6 +553,7 @@ model Assessment {
   scores                AssessmentScore[]
   competencyResults     CompetencyResult[]
   auditLogs             AssessmentAuditLog[]
+  certificate           Certificate?
 
   @@map("assessments")
 }
@@ -683,6 +685,7 @@ model AssessmentAttempt {
 
   questions          AssessmentQuestion[]
   answers            AssessmentAnswer[]
+  certificate        Certificate?
 
   @@index([workerProfileId])
   @@index([rplApplicationId])
@@ -724,3 +727,43 @@ model AssessmentAnswer {
   @@index([attemptId])
   @@map("assessment_answers")
 }
+
+// ==========================================
+// CERTIFICATES (RPL ASSESSMENT OUTCOMES)
+// ==========================================
+
+model Certificate {
+  id                   String             @id @default(uuid())
+  certificateNumber    String             @unique // e.g. "SKILLRPL-CERT-2026-849201"
+  workerProfileId      String
+  workerProfile        WorkerProfile      @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  assessmentAttemptId  String?            @unique
+  assessmentAttempt    AssessmentAttempt? @relation(fields: [assessmentAttemptId], references: [id], onDelete: SetNull)
+  assessmentId         String?            @unique
+  assessment           Assessment?        @relation(fields: [assessmentId], references: [id], onDelete: SetNull)
+  workerName           String
+  workerIdentifier     String?
+  trade                String
+  assessmentName       String             @default("Recognition of Prior Learning Assessment")
+  score                Float              // e.g. 8
+  totalScore           Float              @default(10)
+  percentage           Float              // e.g. 80
+  nsqfLevel            Int                @default(4)
+  qualificationPack    String?            @default("Assistant Electrician (ELE/Q0101)")
+  assessorName         String?            @default("Dr. Vikramaditya Sharma")
+  assessorId           String?            @default("ASSESS-NSDC-2024-8842")
+  assessorDesignation  String?            @default("CSDCI / NCVET Accredited Lead Assessor")
+  assessmentCompletedAt DateTime          @default(now())
+  issuedAt             DateTime           @default(now())
+  status               String             @default("ISSUED") // "ISSUED" | "REVOKED"
+  isDemo               Boolean            @default(false)
+  verificationCode     String?            // unique token for verification
+  metadata             Json?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([workerProfileId])
+  @@index([certificateNumber])
+  @@map("certificates")
+}
+
