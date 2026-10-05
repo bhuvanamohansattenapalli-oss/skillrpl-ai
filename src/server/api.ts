@@ -809,6 +809,187 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
   }
 
+  // 7.4 Google Auth URL: GET /api/auth/google/url
+  if (pathname === '/api/auth/google/url') {
+    if (req.method !== 'GET') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use GET.' });
+      return true;
+    }
+
+    try {
+      const { getGoogleAuthUrl, getGoogleOAuthClientConfig } = await import('./auth.js');
+      const config = getGoogleOAuthClientConfig();
+      const host = req.headers.host || 'localhost:5173';
+      const protocol = (req.headers['x-forwarded-proto'] as string) || (host.startsWith('localhost') ? 'http' : 'https');
+      const fallbackRedirect = `${protocol}://${host}/api/auth/google/callback`;
+      const requestedRedirect = parsedUrl.searchParams.get('redirect_uri') || config.callbackUrl || fallbackRedirect;
+      const state = parsedUrl.searchParams.get('state') || undefined;
+
+      if (!config.clientId) {
+        sendJsonResponse(res, 200, {
+          success: false,
+          isConfigured: false,
+          error: 'Google OAuth credentials (GOOGLE_CLIENT_ID) are not configured.'
+        });
+        return true;
+      }
+
+      const url = getGoogleAuthUrl({ redirectUri: requestedRedirect, state });
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        isConfigured: true,
+        url,
+        redirectUri: requestedRedirect
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Google Auth URL Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to generate Google auth URL.' });
+      return true;
+    }
+  }
+
+  // 7.5 Google Auth Callback: GET /api/auth/google/callback
+  if (pathname === '/api/auth/google/callback') {
+    if (req.method !== 'GET') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use GET.' });
+      return true;
+    }
+
+    try {
+      const errorParam = parsedUrl.searchParams.get('error');
+      const errorDescription = parsedUrl.searchParams.get('error_description') || errorParam;
+      if (errorParam) {
+        res.statusCode = 302;
+        res.setHeader('Location', `/?auth_error=${encodeURIComponent(errorDescription || 'Google sign-in was cancelled or denied.')}`);
+        res.end();
+        return true;
+      }
+
+      const code = parsedUrl.searchParams.get('code');
+      if (!code) {
+        res.statusCode = 302;
+        res.setHeader('Location', '/?auth_error=Missing+Google+authorization+code');
+        res.end();
+        return true;
+      }
+
+      const { exchangeGoogleAuthCode, fetchGoogleUserProfile, handleGoogleUserAuth, getGoogleOAuthClientConfig } = await import('./auth.js');
+      const config = getGoogleOAuthClientConfig();
+      const host = req.headers.host || 'localhost:5173';
+      const protocol = (req.headers['x-forwarded-proto'] as string) || (host.startsWith('localhost') ? 'http' : 'https');
+      const redirectUri = config.callbackUrl || `${protocol}://${host}/api/auth/google/callback`;
+
+      const tokens = await exchangeGoogleAuthCode(code, redirectUri);
+      const googleProfile = await fetchGoogleUserProfile(tokens.access_token);
+
+      const authResult = await handleGoogleUserAuth({
+        googleId: googleProfile.sub,
+        email: googleProfile.email,
+        name: googleProfile.name,
+        picture: googleProfile.picture
+      });
+
+      // Redirect back to root with auth token
+      res.statusCode = 302;
+      res.setHeader('Location', `/?auth_token=${encodeURIComponent(authResult.token)}&role=${encodeURIComponent(authResult.user.role)}`);
+      res.end();
+      return true;
+    } catch (err: any) {
+      console.error('[Google Auth Callback Error]', err);
+      res.statusCode = 302;
+      res.setHeader('Location', `/?auth_error=${encodeURIComponent(err.message || 'Google authentication failed.')}`);
+      res.end();
+      return true;
+    }
+  }
+
+  // 7.6 Direct Google Token/Code Auth: POST /api/auth/google
+  if (pathname === '/api/auth/google') {
+    if (req.method !== 'POST') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use POST.' });
+      return true;
+    }
+
+    try {
+      const rawBody: any = await parseRequestBody(req);
+      const { code, idToken, accessToken, redirectUri, profile } = rawBody;
+
+      const {
+        exchangeGoogleAuthCode,
+        fetchGoogleUserProfile,
+        verifyGoogleIdToken,
+        handleGoogleUserAuth,
+        getGoogleOAuthClientConfig
+      } = await import('./auth.js');
+
+      let googleId: string | undefined;
+      let email: string | undefined;
+      let name: string | undefined;
+      let picture: string | undefined;
+
+      if (idToken) {
+        const verified = await verifyGoogleIdToken(idToken);
+        googleId = verified.sub;
+        email = verified.email;
+        name = verified.name;
+        picture = verified.picture;
+      } else if (code) {
+        const config = getGoogleOAuthClientConfig();
+        const host = req.headers.host || 'localhost:5173';
+        const protocol = (req.headers['x-forwarded-proto'] as string) || (host.startsWith('localhost') ? 'http' : 'https');
+        const resolvedRedirect = redirectUri || config.callbackUrl || `${protocol}://${host}/api/auth/google/callback`;
+        const tokens = await exchangeGoogleAuthCode(code, resolvedRedirect);
+        const userProfile = await fetchGoogleUserProfile(tokens.access_token);
+        googleId = userProfile.sub;
+        email = userProfile.email;
+        name = userProfile.name;
+        picture = userProfile.picture;
+      } else if (accessToken) {
+        const userProfile = await fetchGoogleUserProfile(accessToken);
+        googleId = userProfile.sub;
+        email = userProfile.email;
+        name = userProfile.name;
+        picture = userProfile.picture;
+      } else if (profile && profile.email) {
+        // Direct verified profile payload (from Supabase Google OAuth)
+        googleId = profile.id || profile.sub;
+        email = profile.email;
+        name = profile.name || profile.full_name;
+        picture = profile.picture || profile.avatar_url;
+      } else {
+        sendJsonResponse(res, 400, { success: false, error: 'Google credential (code, idToken, or accessToken) is required.' });
+        return true;
+      }
+
+      if (!email) {
+        sendJsonResponse(res, 400, { success: false, error: 'Google profile did not contain a valid email.' });
+        return true;
+      }
+
+      const authResult = await handleGoogleUserAuth({
+        googleId,
+        email,
+        name,
+        picture
+      });
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        user: authResult.user,
+        profile: authResult.profile,
+        token: authResult.token,
+        data: authResult
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Google Auth Direct Error]', err);
+      sendJsonResponse(res, err.status || 500, { success: false, error: err.message || 'Google authentication failed.' });
+      return true;
+    }
+  }
+
   // 8. Auth Get User Role & Profile: GET /api/auth/user-role or GET /api/auth/me
   if (pathname === '/api/auth/user-role' || pathname === '/api/auth/me') {
     if (req.method !== 'GET') {

@@ -100,6 +100,28 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     let mounted = true;
 
     const restoreSession = async () => {
+      // 0. Check URL params for Google OAuth callback result
+      if (typeof window !== 'undefined') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlAuthToken = urlParams.get('auth_token');
+        const urlAuthError = urlParams.get('auth_error');
+
+        if (urlAuthError) {
+          setError(decodeURIComponent(urlAuthError));
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } else if (urlAuthToken) {
+          localStorage.setItem('skillrpl_auth_token', urlAuthToken);
+          localStorage.removeItem('skillrpl_demo_user');
+          window.history.replaceState({}, document.title, window.location.pathname);
+          const userRole = await fetchServerProfile(urlAuthToken);
+          if (userRole && mounted) {
+            setSession({ access_token: urlAuthToken } as any);
+            setLoading(false);
+            return;
+          }
+        }
+      }
+
       // 1. Check if demo user is stored in localStorage
       const savedDemoUser = localStorage.getItem('skillrpl_demo_user');
       if (savedDemoUser) {
@@ -178,6 +200,25 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setSession(currentSession);
             setUser(currentSession.user ?? null);
             if (currentSession.access_token) {
+              // Sync Google user with backend Prisma DB if user came from Supabase OAuth
+              if (currentSession.user?.app_metadata?.provider === 'google' || currentSession.user?.email) {
+                try {
+                  await fetch('/api/auth/google', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      profile: {
+                        id: currentSession.user.id,
+                        email: currentSession.user.email,
+                        name: currentSession.user.user_metadata?.full_name || currentSession.user.user_metadata?.name,
+                        picture: currentSession.user.user_metadata?.avatar_url || currentSession.user.user_metadata?.picture
+                      }
+                    })
+                  });
+                } catch (syncErr) {
+                  console.warn('[AuthContext] Supabase Google sync warning:', syncErr);
+                }
+              }
               await fetchServerProfile(currentSession.access_token);
             }
           }
@@ -387,19 +428,41 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const signInWithGoogle = async () => {
     setError(null);
-    if (!supabase) {
-      setError('Google sign-in is currently unavailable.');
-      return;
-    }
-    const { error: oauthError } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin
+    
+    // 1. Try server-side official Google OAuth 2.0 flow
+    try {
+      const res = await fetch('/api/auth/google/url');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.url) {
+          window.location.href = data.url;
+          return;
+        }
       }
-    });
-    if (oauthError) {
-      setError(oauthError.message);
+    } catch (urlErr) {
+      console.warn('[AuthContext] Failed to get server Google auth URL:', urlErr);
     }
+
+    // 2. Fallback to Supabase OAuth if available
+    if (supabase) {
+      try {
+        const { error: oauthError } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: window.location.origin
+          }
+        });
+        if (oauthError) {
+          setError(oauthError.message);
+        }
+        return;
+      } catch (sbErr: any) {
+        setError(sbErr?.message || 'Failed to initiate Google authentication.');
+        return;
+      }
+    }
+
+    setError('Google Sign-In is not configured. Please configure GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.');
   };
 
   const demoSignIn = async (targetRole: 'WORKER' | 'ASSESSOR') => {
