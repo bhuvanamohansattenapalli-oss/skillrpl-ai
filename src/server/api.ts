@@ -2372,6 +2372,533 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
   }
 
+  // =========================================================================
+  // 13. 10-MCQ TOPIC-BASED RPL ASSESSMENT (PHASE 4)
+  // =========================================================================
+
+  // 13.1 Start 10-MCQ Assessment: POST /api/assessment/start
+  if (pathname === '/api/assessment/start' && req.method === 'POST') {
+    try {
+      const body = (await parseRequestBody(req)) as {
+        topic?: string;
+        workerProfileId?: string;
+        rplApplicationId?: string;
+        isOffline?: boolean;
+      };
+
+      const topic = body.topic?.trim() || 'Electrician';
+      const { prisma } = await import('../lib/db.ts');
+      const { generate10MCQQuestions } = await import('../lib/assessment/ai-mcq-generator.ts');
+
+      // Resolve worker profile
+      let workerProfileId = body.workerProfileId;
+      if (!workerProfileId) {
+        try {
+          const auth = await resolveAuthenticatedWorker(req);
+          workerProfileId = auth.workerProfile.id;
+        } catch {
+          // Fallback to finding first worker or creating demo worker
+          let worker = await prisma.workerProfile.findFirst();
+          if (!worker) {
+            let user = await prisma.user.findFirst({ where: { role: 'WORKER' } });
+            if (!user) {
+              user = await prisma.user.create({
+                data: {
+                  email: 'candidate@skillrpl.gov.in',
+                  role: 'WORKER'
+                }
+              });
+            }
+            worker = await prisma.workerProfile.create({
+              data: {
+                userId: user.id,
+                name: 'Worker Candidate',
+                email: user.email,
+                trade: topic
+              }
+            });
+          }
+          workerProfileId = worker.id;
+        }
+      }
+
+      // Generate exactly 10 questions using Gemini or Verified Question Bank fallback
+      const genResult = await generate10MCQQuestions(topic);
+      const questions = genResult.questions;
+
+      if (questions.length !== 10) {
+        throw new Error(`Invalid assessment generation: Expected 10 questions, got ${questions.length}`);
+      }
+
+      // Create AssessmentAttempt in database
+      const attempt = await prisma.assessmentAttempt.create({
+        data: {
+          workerProfileId,
+          rplApplicationId: body.rplApplicationId || null,
+          topic,
+          trade: topic,
+          status: 'IN_PROGRESS',
+          totalQuestions: 10,
+          timerLimitSeconds: 600, // 10 minutes default
+          isOfflineAttempt: Boolean(body.isOffline),
+          questions: {
+            create: questions.map((q, idx) => ({
+              questionIndex: idx,
+              question: q.question,
+              options: q.options,
+              correctAnswer: q.correctAnswer, // Stored safely on server!
+              category: q.category,
+              difficulty: q.difficulty,
+              explanation: q.explanation
+            }))
+          }
+        },
+        include: {
+          questions: {
+            select: {
+              id: true,
+              questionIndex: true,
+              question: true,
+              options: true,
+              category: true,
+              difficulty: true
+              // Note: correctAnswer and explanation are strictly OMITTED for client security
+            },
+            orderBy: { questionIndex: 'asc' }
+          }
+        }
+      });
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        attemptId: attempt.id,
+        topic: attempt.topic,
+        timerLimitSeconds: attempt.timerLimitSeconds,
+        startedAt: attempt.startedAt,
+        totalQuestions: 10,
+        source: genResult.source,
+        questions: attempt.questions
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Start MCQ Assessment Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to start assessment.' });
+      return true;
+    }
+  }
+
+  // 13.2 Submit 10-MCQ Assessment: POST /api/assessment/submit
+  if (pathname === '/api/assessment/submit' && req.method === 'POST') {
+    try {
+      const body = (await parseRequestBody(req)) as {
+        attemptId?: string;
+        answers?: Record<string, number>; // questionId -> selectedAnswer (0..3)
+        timeSpentSeconds?: number;
+        isOfflineSync?: boolean;
+      };
+
+      if (!body.attemptId) {
+        sendJsonResponse(res, 400, { success: false, error: 'attemptId is required.' });
+        return true;
+      }
+
+      const { prisma } = await import('../lib/db.ts');
+      const { generateAIPerformanceSummary } = await import('../lib/assessment/ai-mcq-generator.ts');
+
+      const attempt = await prisma.assessmentAttempt.findUnique({
+        where: { id: body.attemptId },
+        include: {
+          questions: { orderBy: { questionIndex: 'asc' } },
+          answers: true
+        }
+      });
+
+      if (!attempt) {
+        sendJsonResponse(res, 404, { success: false, error: 'Assessment attempt not found.' });
+        return true;
+      }
+
+      const submittedAnswers = body.answers || {};
+
+      // Server-side scoring calculation
+      let correctCount = 0;
+      let incorrectCount = 0;
+      const categoryScores: Record<string, { correct: number; total: number }> = {};
+      const answerCreates: Array<{
+        questionId: string;
+        selectedAnswer: number;
+        isCorrect: boolean;
+      }> = [];
+
+      for (const q of attempt.questions) {
+        const cat = q.category || 'General';
+        if (!categoryScores[cat]) {
+          categoryScores[cat] = { correct: 0, total: 0 };
+        }
+        categoryScores[cat].total += 1;
+
+        const selected = submittedAnswers[q.id];
+        const isSelected = selected !== undefined && selected !== null && Number.isInteger(selected);
+        const isCorrect = isSelected && selected === q.correctAnswer;
+
+        if (isCorrect) {
+          correctCount += 1;
+          categoryScores[cat].correct += 1;
+        } else {
+          incorrectCount += 1;
+        }
+
+        answerCreates.push({
+          questionId: q.id,
+          selectedAnswer: isSelected ? selected : -1,
+          isCorrect
+        });
+      }
+
+      const totalQuestions = attempt.questions.length || 10;
+      const score = correctCount; // 10 questions = 10 marks
+      const percentage = Math.round((score / totalQuestions) * 100);
+
+      // System assessment indicator (NOT official certification):
+      // "Strong Performance" (>=70%), "Needs Improvement" (50-69%), "Further Assessment Recommended" (<50%)
+      let systemIndicator = 'Further Assessment Recommended';
+      if (percentage >= 70) {
+        systemIndicator = 'Strong Performance';
+      } else if (percentage >= 50) {
+        systemIndicator = 'Needs Improvement';
+      }
+
+      // Generate AI-Assisted Performance Summary
+      const aiSummary = await generateAIPerformanceSummary({
+        topic: attempt.topic,
+        score,
+        total: totalQuestions,
+        percentage,
+        categoryScores,
+        timeSpentSeconds: body.timeSpentSeconds
+      });
+
+      // Upsert answers
+      for (const ans of answerCreates) {
+        await prisma.assessmentAnswer.upsert({
+          where: {
+            attemptId_questionId: {
+              attemptId: attempt.id,
+              questionId: ans.questionId
+            }
+          },
+          create: {
+            attemptId: attempt.id,
+            questionId: ans.questionId,
+            selectedAnswer: ans.selectedAnswer,
+            isCorrect: ans.isCorrect
+          },
+          update: {
+            selectedAnswer: ans.selectedAnswer,
+            isCorrect: ans.isCorrect
+          }
+        });
+      }
+
+      const updatedAttempt = await prisma.assessmentAttempt.update({
+        where: { id: attempt.id },
+        data: {
+          status: 'COMPLETED',
+          score,
+          totalQuestions,
+          percentage,
+          correctCount,
+          incorrectCount,
+          systemIndicator,
+          categoryScores: categoryScores as any,
+          aiSummary,
+          timeSpentSeconds: body.timeSpentSeconds || null,
+          submittedAt: new Date(),
+          syncedAt: body.isOfflineSync ? new Date() : null
+        },
+        include: {
+          questions: { orderBy: { questionIndex: 'asc' } },
+          answers: true
+        }
+      });
+
+      // Build question review (only available AFTER submission)
+      const questionReview = updatedAttempt.questions.map((q) => {
+        const ans = updatedAttempt.answers.find((a) => a.questionId === q.id);
+        const selectedAnswer = ans !== undefined ? ans.selectedAnswer : -1;
+        return {
+          questionId: q.id,
+          questionIndex: q.questionIndex,
+          question: q.question,
+          options: q.options,
+          category: q.category,
+          difficulty: q.difficulty,
+          selectedAnswer,
+          correctAnswer: q.correctAnswer,
+          isCorrect: ans?.isCorrect ?? false,
+          explanation: q.explanation
+        };
+      });
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        message: 'Assessment submitted successfully.',
+        attempt: {
+          id: updatedAttempt.id,
+          topic: updatedAttempt.topic,
+          score: updatedAttempt.score,
+          totalQuestions: updatedAttempt.totalQuestions,
+          percentage: updatedAttempt.percentage,
+          correctCount: updatedAttempt.correctCount,
+          incorrectCount: updatedAttempt.incorrectCount,
+          systemIndicator: updatedAttempt.systemIndicator,
+          categoryScores: updatedAttempt.categoryScores,
+          aiSummary: updatedAttempt.aiSummary,
+          submittedAt: updatedAttempt.submittedAt,
+          timeSpentSeconds: updatedAttempt.timeSpentSeconds
+        },
+        questionReview
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Submit MCQ Assessment Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to submit assessment.' });
+      return true;
+    }
+  }
+
+  // 13.3 Get Assessment Attempt Details: GET /api/assessment/attempt?id=...
+  if (pathname === '/api/assessment/attempt' && req.method === 'GET') {
+    try {
+      const attemptId = parsedUrl.searchParams.get('id');
+      if (!attemptId) {
+        sendJsonResponse(res, 400, { success: false, error: 'Attempt ID is required.' });
+        return true;
+      }
+
+      const { prisma } = await import('../lib/db.ts');
+      const attempt = await prisma.assessmentAttempt.findUnique({
+        where: { id: attemptId },
+        include: {
+          questions: { orderBy: { questionIndex: 'asc' } },
+          answers: true,
+          workerProfile: {
+            select: { id: true, name: true, email: true, trade: true }
+          }
+        }
+      });
+
+      if (!attempt) {
+        sendJsonResponse(res, 404, { success: false, error: 'Attempt not found.' });
+        return true;
+      }
+
+      const isCompleted = attempt.status === 'COMPLETED';
+
+      // Security: Only send correctAnswer and explanation if assessment is completed
+      const questions = attempt.questions.map((q) => {
+        const ans = attempt.answers.find((a) => a.questionId === q.id);
+        const base = {
+          id: q.id,
+          questionIndex: q.questionIndex,
+          question: q.question,
+          options: q.options,
+          category: q.category,
+          difficulty: q.difficulty
+        };
+
+        if (isCompleted) {
+          return {
+            ...base,
+            selectedAnswer: ans !== undefined ? ans.selectedAnswer : -1,
+            correctAnswer: q.correctAnswer,
+            isCorrect: ans?.isCorrect ?? false,
+            explanation: q.explanation
+          };
+        }
+        return base;
+      });
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        attempt: {
+          id: attempt.id,
+          topic: attempt.topic,
+          status: attempt.status,
+          score: attempt.score,
+          totalQuestions: attempt.totalQuestions,
+          percentage: attempt.percentage,
+          correctCount: attempt.correctCount,
+          incorrectCount: attempt.incorrectCount,
+          systemIndicator: attempt.systemIndicator,
+          categoryScores: attempt.categoryScores,
+          aiSummary: attempt.aiSummary,
+          timeSpentSeconds: attempt.timeSpentSeconds,
+          startedAt: attempt.startedAt,
+          submittedAt: attempt.submittedAt,
+          assessorDecision: attempt.assessorDecision,
+          assessorNotes: attempt.assessorNotes,
+          assessorReviewedAt: attempt.assessorReviewedAt,
+          worker: attempt.workerProfile
+        },
+        questions
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Get MCQ Attempt Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to fetch attempt.' });
+      return true;
+    }
+  }
+
+  // 13.4 List Worker Attempts: GET /api/assessment/worker-attempts
+  if (pathname === '/api/assessment/worker-attempts' && req.method === 'GET') {
+    try {
+      const { prisma } = await import('../lib/db.ts');
+      let workerProfileId = parsedUrl.searchParams.get('workerProfileId');
+
+      if (!workerProfileId) {
+        try {
+          const auth = await resolveAuthenticatedWorker(req);
+          workerProfileId = auth.workerProfile.id;
+        } catch {
+          const firstWorker = await prisma.workerProfile.findFirst();
+          workerProfileId = firstWorker?.id || null;
+        }
+      }
+
+      if (!workerProfileId) {
+        sendJsonResponse(res, 200, { success: true, attempts: [] });
+        return true;
+      }
+
+      const attempts = await prisma.assessmentAttempt.findMany({
+        where: { workerProfileId },
+        orderBy: { createdAt: 'desc' },
+        take: 20
+      });
+
+      sendJsonResponse(res, 200, { success: true, attempts });
+      return true;
+    } catch (err: any) {
+      console.error('[Worker Attempts Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to retrieve attempts.' });
+      return true;
+    }
+  }
+
+  // 13.5 Assessor Action on Assessment Attempt: POST /api/assessor/assessment-attempt/action
+  if (pathname === '/api/assessor/assessment-attempt/action' && req.method === 'POST') {
+    try {
+      const body = (await parseRequestBody(req)) as {
+        attemptId?: string;
+        decision?: 'ACCEPT_FURTHER_ASSESSMENT' | 'REQUEST_REASSESSMENT' | 'MARK_PRACTICAL_VERIFICATION';
+        notes?: string;
+        assessorId?: string;
+      };
+
+      if (!body.attemptId || !body.decision) {
+        sendJsonResponse(res, 400, {
+          success: false,
+          error: 'attemptId and a valid decision (ACCEPT_FURTHER_ASSESSMENT | REQUEST_REASSESSMENT | MARK_PRACTICAL_VERIFICATION) are required.'
+        });
+        return true;
+      }
+
+      const validDecisions = ['ACCEPT_FURTHER_ASSESSMENT', 'REQUEST_REASSESSMENT', 'MARK_PRACTICAL_VERIFICATION'];
+      if (!validDecisions.includes(body.decision)) {
+        sendJsonResponse(res, 400, {
+          success: false,
+          error: `Invalid decision. Allowed values: ${validDecisions.join(', ')}`
+        });
+        return true;
+      }
+
+      const { prisma } = await import('../lib/db.ts');
+
+      const updated = await prisma.assessmentAttempt.update({
+        where: { id: body.attemptId },
+        data: {
+          assessorDecision: body.decision,
+          assessorNotes: body.notes?.trim() || null,
+          assessorReviewedAt: new Date(),
+          assessorId: body.assessorId || null
+        }
+      });
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        message: `Assessor action recorded: ${body.decision}`,
+        attempt: updated
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Assessor Attempt Action Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to record assessor action.' });
+      return true;
+    }
+  }
+
+  // 13.6 Assessor List of MCQ Assessments: GET /api/assessor/mcq-assessments
+  if (pathname === '/api/assessor/mcq-assessments' && req.method === 'GET') {
+    try {
+      const { prisma } = await import('../lib/db.ts');
+      const attempts = await prisma.assessmentAttempt.findMany({
+        include: {
+          workerProfile: {
+            select: { id: true, name: true, email: true, trade: true, phone: true }
+          },
+          _count: {
+            select: { questions: true, answers: true }
+          }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50
+      });
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        data: attempts
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Assessor MCQ List Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to fetch MCQ assessment queue.' });
+      return true;
+    }
+  }
+
+  // 13.7 Offline Pre-cache Question Pack: GET /api/assessment/offline-pack
+  if (pathname === '/api/assessment/offline-pack' && req.method === 'GET') {
+    try {
+      const topic = parsedUrl.searchParams.get('topic') || 'Electrician';
+      const { selectQuestionsFromBank } = await import('../lib/assessment/mcq-question-bank.ts');
+      const questions = selectQuestionsFromBank(topic, 10, Date.now());
+
+      // Strip correct answer for offline caching
+      const sanitized = questions.map((q, idx) => ({
+        id: `offline_${idx}_${Date.now()}`,
+        questionIndex: idx,
+        question: q.question,
+        options: q.options,
+        category: q.category,
+        difficulty: q.difficulty
+      }));
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        topic,
+        questions: sanitized,
+        cachedAt: new Date().toISOString()
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Offline Pack Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to fetch offline pack.' });
+      return true;
+    }
+  }
+
   return false;
 }
 

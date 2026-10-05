@@ -8,6 +8,7 @@
     "build": "prisma generate && tsc -b && vite build",
     "lint": "oxlint",
     "test:mapping": "npx tsx scripts/run-qualification-tests.mjs",
+    "test:mcq": "npx tsx scripts/run-10mcq-tests.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

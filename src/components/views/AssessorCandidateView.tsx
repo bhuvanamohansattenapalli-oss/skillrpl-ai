@@ -10,7 +10,8 @@ import {
   Cpu,
   CheckCircle2,
   BookOpen,
-  Award
+  Award,
+  HelpCircle
 } from 'lucide-react';
 import { GlassCard } from '../common/GlassCard';
 import { GlassButton } from '../common/GlassButton';
@@ -32,7 +33,7 @@ export const AssessorCandidateView: React.FC = () => {
     showToast
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'criteria' | 'evidence' | 'declaration' | 'ai-insights' | 'mapping-review'>('criteria');
+  const [activeTab, setActiveTab] = useState<'criteria' | 'evidence' | 'declaration' | 'ai-insights' | 'mapping-review' | 'mcq-assessment'>('mcq-assessment');
 
   // Supabase & Mapping State
   const [supabaseAppId, setSupabaseAppId] = useState<string | null>(null);
@@ -54,7 +55,74 @@ export const AssessorCandidateView: React.FC = () => {
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [dbSynced, setDbSynced] = useState(false);
 
+  // 10-MCQ Assessment State
+  const [mcqAttempt, setMcqAttempt] = useState<any | null>(null);
+  const [mcqQuestions, setMcqQuestions] = useState<any[]>([]);
+  const [loadingMcq, setLoadingMcq] = useState<boolean>(false);
+  const [assessorDecision, setAssessorDecision] = useState<string | null>(null);
+  const [assessorDecisionNotes, setAssessorDecisionNotes] = useState<string>('');
+  const [submittingDecision, setSubmittingDecision] = useState<boolean>(false);
+
   const allVerifiedQps = getAllVerifiedQualifications();
+
+  // Load candidate's 10-MCQ Assessment Attempt
+  useEffect(() => {
+    let isMounted = true;
+    async function loadMCQAttempt() {
+      try {
+        setLoadingMcq(true);
+        const res = await fetch('/api/assessor/mcq-assessments');
+        const json = await res.json();
+        if (isMounted && json.success && Array.isArray(json.data) && json.data.length > 0) {
+          const latest = json.data[0];
+          const detRes = await fetch(`/api/assessment/attempt?id=${encodeURIComponent(latest.id)}`);
+          const detJson = await detRes.json();
+          if (isMounted && detJson.success) {
+            setMcqAttempt(detJson.attempt);
+            setMcqQuestions(detJson.questions || []);
+            setAssessorDecision(detJson.attempt.assessorDecision || null);
+            setAssessorDecisionNotes(detJson.attempt.assessorNotes || '');
+          }
+        }
+      } catch (err) {
+        console.warn('Could not load MCQ attempt for assessor:', err);
+      } finally {
+        if (isMounted) setLoadingMcq(false);
+      }
+    }
+    loadMCQAttempt();
+    return () => { isMounted = false; };
+  }, []);
+
+  const handleRecordAssessorMCQAction = async (decision: 'ACCEPT_FURTHER_ASSESSMENT' | 'REQUEST_REASSESSMENT' | 'MARK_PRACTICAL_VERIFICATION') => {
+    if (!mcqAttempt?.id) {
+      showToast('No active assessment attempt to record action for.', 'warning');
+      return;
+    }
+    setSubmittingDecision(true);
+    try {
+      const res = await fetch('/api/assessor/assessment-attempt/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attemptId: mcqAttempt.id,
+          decision,
+          notes: assessorDecisionNotes
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAssessorDecision(decision);
+        showToast(`Assessor action recorded: ${decision.replace(/_/g, ' ')}`, 'success');
+      } else {
+        throw new Error(data.error);
+      }
+    } catch (e: any) {
+      showToast(e.message || 'Failed to record assessor decision', 'error');
+    } finally {
+      setSubmittingDecision(false);
+    }
+  };
 
   // Fetch real candidate evaluation data from Supabase
   useEffect(() => {
@@ -324,8 +392,9 @@ export const AssessorCandidateView: React.FC = () => {
           {/* Navigation Sub-Tabs */}
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {[
-              { id: 'criteria', label: 'Practical Task Checklist', icon: <CheckCircle2 size={14} /> },
-              { id: 'mapping-review', label: 'Review NSQF Mapping', icon: <Award size={14} /> },
+              { id: 'mcq-assessment', label: '10-MCQ Screening', icon: <CheckCircle2 size={14} /> },
+              { id: 'criteria', label: 'Practical Task Checklist', icon: <Award size={14} /> },
+              { id: 'mapping-review', label: 'Review NSQF Mapping', icon: <FileText size={14} /> },
               { id: 'evidence', label: `Candidate Evidence (${evidenceList.length})`, icon: <FileText size={14} /> },
               { id: 'declaration', label: 'Self Declaration', icon: <BookOpen size={14} /> },
               { id: 'ai-insights', label: 'AI Skill Analysis Insights', icon: <Cpu size={14} /> }
@@ -693,6 +762,242 @@ export const AssessorCandidateView: React.FC = () => {
                   />
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Tab 6: 10-MCQ Screening Assessment View (Phase 4) */}
+          {activeTab === 'mcq-assessment' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              {loadingMcq ? (
+                <GlassCard style={{ padding: '32px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '14px', color: 'var(--color-primary-navy)' }}>Loading candidate MCQ assessment records...</div>
+                </GlassCard>
+              ) : mcqAttempt ? (
+                <>
+                  {/* Candidate Attempt Overview Banner */}
+                  <GlassCard
+                    variant="elevated"
+                    style={{
+                      padding: '24px',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '16px'
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', color: 'var(--color-accent-teal)', letterSpacing: '0.05em' }}>
+                          10-QUESTION MCQ ASSESSMENT RESULT
+                        </span>
+                        <GlassBadge variant="navy">{mcqAttempt.topic}</GlassBadge>
+                        {assessorDecision && (
+                          <GlassBadge variant="teal">
+                            Decision: {assessorDecision.replace(/_/g, ' ')}
+                          </GlassBadge>
+                        )}
+                      </div>
+                      <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--color-primary-navy)', marginTop: '4px' }}>
+                        Candidate: {mcqAttempt.worker?.name || candidate.name}
+                      </h3>
+                      <div style={{ fontSize: '12.5px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                        Assessed on {new Date(mcqAttempt.submittedAt || mcqAttempt.startedAt).toLocaleDateString()} at{' '}
+                        {new Date(mcqAttempt.submittedAt || mcqAttempt.startedAt).toLocaleTimeString()}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+                      <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
+                          Screening Score
+                        </div>
+                        <div style={{ fontSize: '28px', fontWeight: 900, color: 'var(--color-primary-navy)' }}>
+                          {mcqAttempt.score}/10 <span style={{ fontSize: '16px', color: 'var(--color-accent-teal)' }}>({mcqAttempt.percentage}%)</span>
+                        </div>
+                      </div>
+                    </div>
+                  </GlassCard>
+
+                  {/* System Assessment Indicator & AI Summary */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px' }}>
+                    <GlassCard style={{ padding: '20px' }}>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
+                        System Assessment Indicator
+                      </div>
+                      <div style={{ marginTop: '8px' }}>
+                        <span
+                          style={{
+                            fontSize: '15px',
+                            fontWeight: 800,
+                            padding: '4px 12px',
+                            borderRadius: '8px',
+                            background: mcqAttempt.percentage >= 70 ? 'rgba(13, 148, 136, 0.15)' : 'rgba(234, 179, 8, 0.15)',
+                            color: mcqAttempt.percentage >= 70 ? '#0D9488' : '#B45309'
+                          }}
+                        >
+                          {mcqAttempt.systemIndicator || (mcqAttempt.percentage >= 70 ? 'Strong Performance' : 'Needs Improvement')}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '8px' }}>
+                        *System assessment indicator only. The accredited human assessor retains final authority.
+                      </div>
+                    </GlassCard>
+
+                    <GlassCard style={{ padding: '20px', background: 'linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(240, 253, 250, 0.8) 100%)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                        <Sparkles size={15} color="var(--color-accent-teal)" />
+                        <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--color-accent-teal)', textTransform: 'uppercase' }}>
+                          AI-Assisted Performance Summary
+                        </span>
+                      </div>
+                      <p style={{ fontSize: '12.5px', color: 'var(--color-primary-navy)', lineHeight: 1.45 }}>
+                        {mcqAttempt.aiSummary || 'Worker completed knowledge assessment. Review question breakdown for practical gaps.'}
+                      </p>
+                    </GlassCard>
+                  </div>
+
+                  {/* Competency Category Breakdown */}
+                  {mcqAttempt.categoryScores && (
+                    <GlassCard style={{ padding: '20px' }}>
+                      <h4 style={{ fontSize: '14px', fontWeight: 800, color: 'var(--color-primary-navy)', marginBottom: '12px' }}>
+                        Competency Category Breakdown
+                      </h4>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '10px' }}>
+                        {Object.entries(mcqAttempt.categoryScores as Record<string, { correct: number; total: number }>).map(([cat, stats]) => (
+                          <div key={cat} style={{ padding: '10px 14px', borderRadius: '8px', background: 'rgba(18, 59, 93, 0.04)', border: '1px solid rgba(18, 59, 93, 0.08)' }}>
+                            <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--color-primary-navy)' }}>{cat}</div>
+                            <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--color-accent-teal)', marginTop: '2px' }}>
+                              {stats.correct} / {stats.total}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </GlassCard>
+                  )}
+
+                  {/* Assessor Action Card (Mandatory Requirements) */}
+                  <GlassCard
+                    variant="elevated"
+                    style={{
+                      padding: '24px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '16px',
+                      border: '2px solid var(--color-accent-teal)'
+                    }}
+                  >
+                    <div>
+                      <span style={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', color: 'var(--color-accent-teal)', letterSpacing: '0.05em' }}>
+                        ASSESSOR FINAL AUTHORITY & NEXT ACTIONS
+                      </span>
+                      <h4 style={{ fontSize: '16px', fontWeight: 800, color: 'var(--color-primary-navy)', marginTop: '2px' }}>
+                        Record Assessor Determination
+                      </h4>
+                      <p style={{ fontSize: '12.5px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                        Select the official assessment progression for {mcqAttempt.worker?.name || candidate.name}:
+                      </p>
+                    </div>
+
+                    {/* Assessor Decision Buttons */}
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                      <GlassButton
+                        variant={assessorDecision === 'ACCEPT_FURTHER_ASSESSMENT' ? 'primary' : 'secondary'}
+                        disabled={submittingDecision}
+                        onClick={() => handleRecordAssessorMCQAction('ACCEPT_FURTHER_ASSESSMENT')}
+                      >
+                        Accept for Further Assessment
+                      </GlassButton>
+                      <GlassButton
+                        variant={assessorDecision === 'MARK_PRACTICAL_VERIFICATION' ? 'primary' : 'secondary'}
+                        disabled={submittingDecision}
+                        onClick={() => handleRecordAssessorMCQAction('MARK_PRACTICAL_VERIFICATION')}
+                      >
+                        Mark for Practical Verification
+                      </GlassButton>
+                      <GlassButton
+                        variant={assessorDecision === 'REQUEST_REASSESSMENT' ? 'primary' : 'secondary'}
+                        disabled={submittingDecision}
+                        onClick={() => handleRecordAssessorMCQAction('REQUEST_REASSESSMENT')}
+                      >
+                        Request Reassessment
+                      </GlassButton>
+                    </div>
+
+                    {/* Assessor Notes Field */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--color-primary-navy)' }}>
+                        Assessor Decision Notes (Optional):
+                      </label>
+                      <textarea
+                        value={assessorDecisionNotes}
+                        onChange={(e) => setAssessorDecisionNotes(e.target.value)}
+                        placeholder="Provide assessor rationale or specific focus areas for practical verification..."
+                        rows={2}
+                        style={{
+                          width: '100%',
+                          padding: '10px 14px',
+                          borderRadius: '8px',
+                          border: '1px solid rgba(18, 59, 93, 0.15)',
+                          fontSize: '13px',
+                          color: 'var(--color-primary-navy)',
+                          outline: 'none',
+                          resize: 'vertical'
+                        }}
+                      />
+                    </div>
+                  </GlassCard>
+
+                  {/* Question-by-Question Results */}
+                  {mcqQuestions.length > 0 && (
+                    <GlassCard style={{ padding: '24px' }}>
+                      <h4 style={{ fontSize: '15px', fontWeight: 800, color: 'var(--color-primary-navy)', marginBottom: '14px' }}>
+                        Question-by-Question Results ({mcqQuestions.length} Questions)
+                      </h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        {mcqQuestions.map((q, idx) => (
+                          <div
+                            key={q.id}
+                            style={{
+                              padding: '14px 18px',
+                              borderRadius: '10px',
+                              background: q.isCorrect ? 'rgba(13, 148, 136, 0.04)' : 'rgba(239, 68, 68, 0.04)',
+                              border: q.isCorrect ? '1px solid rgba(13, 148, 136, 0.18)' : '1px solid rgba(239, 68, 68, 0.18)'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '12px', fontWeight: 800, color: q.isCorrect ? '#0D9488' : '#DC2626' }}>
+                                Q{idx + 1}: {q.isCorrect ? '✓ Correct' : '✗ Incorrect'} · {q.category}
+                              </span>
+                            </div>
+                            <p style={{ fontSize: '13.5px', fontWeight: 600, color: 'var(--color-primary-navy)', marginTop: '4px' }}>
+                              {q.question}
+                            </p>
+                            <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '4px' }}>
+                              Candidate Selected: <strong>Option {['A', 'B', 'C', 'D'][q.selectedAnswer]} ({q.options[q.selectedAnswer] || 'None'})</strong> | Correct: <strong>Option {['A', 'B', 'C', 'D'][q.correctAnswer]} ({q.options[q.correctAnswer]})</strong>
+                            </div>
+                            {q.explanation && (
+                              <div style={{ fontSize: '11.5px', color: 'var(--color-text-muted)', marginTop: '4px', fontStyle: 'italic' }}>
+                                Key reason: {q.explanation}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </GlassCard>
+                  )}
+                </>
+              ) : (
+                <GlassCard style={{ padding: '32px', textAlign: 'center' }}>
+                  <HelpCircle size={36} color="var(--color-accent-teal)" style={{ margin: '0 auto 12px auto' }} />
+                  <h4 style={{ fontSize: '16px', fontWeight: 800, color: 'var(--color-primary-navy)' }}>
+                    No 10-MCQ Screening Assessment Record Found
+                  </h4>
+                  <p style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                    The candidate has not yet initiated or submitted a 10-MCQ screening assessment.
+                  </p>
+                </GlassCard>
+              )}
             </div>
           )}
         </div>

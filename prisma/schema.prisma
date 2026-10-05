@@ -122,6 +122,7 @@ model WorkerProfile {
   evidences           Evidence[]
   rplApplications     RPLApplication[]
   aiConversations     AIConversation[]
+  assessmentAttempts  AssessmentAttempt[]
 
   @@map("worker_profiles")
 }
@@ -387,6 +388,7 @@ model RPLApplication {
   experiences           RPLApplicationExperience[]
   skills                RPLApplicationSkill[]
   qualificationMappings QualificationMapping[]
+  assessmentAttempts    AssessmentAttempt[]
 
   @@map("rpl_applications")
 }
@@ -640,4 +642,85 @@ model AuditLog {
   createdAt DateTime @default(now())
 
   @@map("audit_logs")
+}
+
+// ==========================================
+// 10-MCQ TOPIC-BASED RPL ASSESSMENT (PHASE 4)
+// ==========================================
+
+model AssessmentAttempt {
+  id                 String              @id @default(uuid())
+  workerProfileId    String
+  workerProfile      WorkerProfile       @relation(fields: [workerProfileId], references: [id], onDelete: Cascade)
+  rplApplicationId   String?
+  rplApplication     RPLApplication?     @relation(fields: [rplApplicationId], references: [id], onDelete: SetNull)
+  topic              String              // e.g. "Electrician", "Solar PV Technician", "Plumber"
+  trade              String?
+  status             String              @default("IN_PROGRESS") // "IN_PROGRESS" | "COMPLETED" | "TIMED_OUT" | "ABANDONED"
+  startedAt          DateTime            @default(now())
+  submittedAt        DateTime?
+  score              Float               @default(0) // 0 to 10
+  totalQuestions     Int                 @default(10)
+  percentage         Float               @default(0) // 0 to 100%
+  correctCount       Int                 @default(0)
+  incorrectCount     Int                 @default(0)
+  systemIndicator    String?             // "Strong Performance" | "Needs Improvement" | "Further Assessment Recommended"
+  categoryScores     Json?               // { "Electrical Safety": { "correct": 2, "total": 2 }, ... }
+  aiSummary          String?             // AI-Assisted Performance Summary
+  timeSpentSeconds   Int?
+  timerLimitSeconds  Int                 @default(600) // 10 minutes default
+  isOfflineAttempt   Boolean             @default(false)
+  syncedAt           DateTime?
+
+  // Assessor Review
+  assessorDecision   String?             // "ACCEPT_FURTHER_ASSESSMENT" | "REQUEST_REASSESSMENT" | "MARK_PRACTICAL_VERIFICATION"
+  assessorNotes      String?
+  assessorReviewedAt DateTime?
+  assessorId         String?
+
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  questions          AssessmentQuestion[]
+  answers            AssessmentAnswer[]
+
+  @@index([workerProfileId])
+  @@index([rplApplicationId])
+  @@index([topic])
+  @@map("assessment_attempts")
+}
+
+model AssessmentQuestion {
+  id            String             @id @default(uuid())
+  attemptId     String
+  attempt       AssessmentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionIndex Int                // 0 to 9
+  question      String
+  options       String[]           // Array of 4 options
+  correctAnswer Int                // 0 to 3 (hidden from client before submit!)
+  category      String             // e.g. "Electrical Safety", "Tools", "Wiring"
+  difficulty    String             @default("MEDIUM") // "EASY" | "MEDIUM" | "HARD"
+  explanation   String?
+  createdAt     DateTime           @default(now())
+
+  answers       AssessmentAnswer[]
+
+  @@index([attemptId])
+  @@map("assessment_questions")
+}
+
+model AssessmentAnswer {
+  id             String             @id @default(uuid())
+  attemptId      String
+  attempt        AssessmentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId     String
+  question       AssessmentQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  selectedAnswer Int                // 0 to 3
+  isCorrect      Boolean            @default(false)
+  answeredAt     DateTime           @default(now())
+  createdAt      DateTime           @default(now())
+
+  @@unique([attemptId, questionId])
+  @@index([attemptId])
+  @@map("assessment_answers")
 }

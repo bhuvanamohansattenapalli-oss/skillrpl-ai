@@ -356,7 +356,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
           className="sidebar-btn"
         >
           <ClipboardCheck size={18} color={isItemActive('skill-assessment') ? '#FFFFFF' : '#9cb3cf'} />
-          <span>Skill Assessment</span>
+          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+            <span>Skill Assessment</span>
+            <span
+              style={{
+                fontSize: '10px',
+                fontWeight: 700,
+                color: isItemActive('skill-assessment') ? '#FFFFFF' : '#0D9488',
+                background: isItemActive('skill-assessment') ? 'rgba(255, 255, 255, 0.2)' : 'rgba(13, 148, 136, 0.15)',
+                border: isItemActive('skill-assessment') ? '1px solid rgba(255, 255, 255, 0.35)' : '1px solid rgba(13, 148, 136, 0.3)',
+                padding: '1px 6px',
+                borderRadius: '6px'
+              }}
+            >
+              10-MCQ
+            </span>
+          </span>
         </button>
 
         {/* 4. My Assessments */}
