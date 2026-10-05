@@ -2516,6 +2516,56 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         }
       }
 
+      // Check if an unfinished attempt already exists for this worker and topic (unless forceNew is requested)
+      const forceNew = (body as any).forceNew === true;
+      if (!forceNew) {
+        const existingAttempt = await prisma.assessmentAttempt.findFirst({
+          where: {
+            workerProfileId,
+            status: 'IN_PROGRESS',
+            topic
+          },
+          orderBy: { createdAt: 'desc' },
+          include: {
+            questions: {
+              select: {
+                id: true,
+                questionIndex: true,
+                question: true,
+                options: true,
+                category: true,
+                difficulty: true
+              },
+              orderBy: { questionIndex: 'asc' }
+            },
+            answers: true
+          }
+        });
+
+        if (existingAttempt && existingAttempt.questions.length === 10) {
+          const answersMap: Record<string, number> = {};
+          for (const ans of existingAttempt.answers) {
+            answersMap[ans.questionId] = ans.selectedAnswer;
+          }
+
+          sendJsonResponse(res, 200, {
+            success: true,
+            resumed: true,
+            attemptId: existingAttempt.id,
+            topic: existingAttempt.topic,
+            timerLimitSeconds: existingAttempt.timerLimitSeconds,
+            timeSpentSeconds: existingAttempt.timeSpentSeconds || 0,
+            startedAt: existingAttempt.startedAt,
+            totalQuestions: 10,
+            source: 'VERIFIED_BANK_FALLBACK',
+            questions: existingAttempt.questions,
+            answers: answersMap,
+            answeredCount: Object.keys(answersMap).length
+          });
+          return true;
+        }
+      }
+
       // Generate exactly 10 questions using Gemini or Verified Question Bank fallback
       const genResult = await generate10MCQQuestions(topic);
       const questions = genResult.questions;
@@ -2565,13 +2615,17 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
 
       sendJsonResponse(res, 200, {
         success: true,
+        resumed: false,
         attemptId: attempt.id,
         topic: attempt.topic,
         timerLimitSeconds: attempt.timerLimitSeconds,
+        timeSpentSeconds: 0,
         startedAt: attempt.startedAt,
         totalQuestions: 10,
         source: genResult.source,
-        questions: attempt.questions
+        questions: attempt.questions,
+        answers: {},
+        answeredCount: 0
       });
       return true;
     } catch (err: any) {
@@ -2926,26 +2980,152 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
   }
 
-  // 13.3 Get Assessment Attempt Details: GET /api/assessment/attempt?id=...
-  if (pathname === '/api/assessment/attempt' && req.method === 'GET') {
+  // 13.2.1 Autosave Single Assessment Answer: POST /api/assessment/answer
+  if (pathname === '/api/assessment/answer') {
+    if (req.method !== 'POST') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use POST.' });
+      return true;
+    }
     try {
-      const attemptId = parsedUrl.searchParams.get('id');
-      if (!attemptId) {
-        sendJsonResponse(res, 400, { success: false, error: 'Attempt ID is required.' });
+      const body = (await parseRequestBody(req)) as {
+        attemptId?: string;
+        questionId?: string;
+        selectedAnswer?: number;
+        timeSpentSeconds?: number;
+      };
+
+      if (!body.attemptId || !body.questionId || body.selectedAnswer === undefined) {
+        sendJsonResponse(res, 400, {
+          success: false,
+          error: 'attemptId, questionId, and selectedAnswer are required.'
+        });
         return true;
       }
 
       const { prisma } = await import('../lib/db.js');
+
       const attempt = await prisma.assessmentAttempt.findUnique({
-        where: { id: attemptId },
-        include: {
-          questions: { orderBy: { questionIndex: 'asc' } },
-          answers: true,
-          workerProfile: {
-            select: { id: true, name: true, email: true, trade: true }
+        where: { id: body.attemptId.trim() },
+        include: { questions: true }
+      });
+
+      if (!attempt) {
+        sendJsonResponse(res, 404, { success: false, error: 'Assessment attempt not found.' });
+        return true;
+      }
+
+      if (attempt.status === 'COMPLETED') {
+        sendJsonResponse(res, 409, { success: false, error: 'Assessment attempt is already completed.' });
+        return true;
+      }
+
+      const question = attempt.questions.find(
+        (q) => q.id === body.questionId || String(q.questionIndex) === String(body.questionId)
+      );
+
+      if (!question) {
+        sendJsonResponse(res, 404, { success: false, error: 'Question not found in this attempt.' });
+        return true;
+      }
+
+      const selectedAnswer = Number(body.selectedAnswer);
+      const isCorrect = selectedAnswer === question.correctAnswer;
+
+      const savedAnswer = await prisma.assessmentAnswer.upsert({
+        where: {
+          attemptId_questionId: {
+            attemptId: attempt.id,
+            questionId: question.id
           }
+        },
+        create: {
+          attemptId: attempt.id,
+          questionId: question.id,
+          selectedAnswer,
+          isCorrect
+        },
+        update: {
+          selectedAnswer,
+          isCorrect,
+          answeredAt: new Date()
         }
       });
+
+      if (body.timeSpentSeconds !== undefined && body.timeSpentSeconds !== null) {
+        await prisma.assessmentAttempt.update({
+          where: { id: attempt.id },
+          data: { timeSpentSeconds: Number(body.timeSpentSeconds) }
+        });
+      }
+
+      const answeredCount = await prisma.assessmentAnswer.count({
+        where: { attemptId: attempt.id }
+      });
+
+      sendJsonResponse(res, 200, {
+        success: true,
+        saved: true,
+        attemptId: attempt.id,
+        questionId: question.id,
+        selectedAnswer: savedAnswer.selectedAnswer,
+        answeredCount,
+        totalQuestions: attempt.totalQuestions
+      });
+      return true;
+    } catch (err: any) {
+      console.error('[Autosave Assessment Answer Error]', err);
+      sendJsonResponse(res, 500, { success: false, error: err.message || 'Failed to save answer.' });
+      return true;
+    }
+  }
+
+  // 13.3 Get Assessment Attempt Details: GET /api/assessment/attempt?id=... (or ?active=true)
+  if (pathname === '/api/assessment/attempt' && req.method === 'GET') {
+    try {
+      const attemptId = parsedUrl.searchParams.get('id');
+      const activeParam = parsedUrl.searchParams.get('active');
+      const { prisma } = await import('../lib/db.js');
+
+      let attempt: any = null;
+
+      if (attemptId) {
+        attempt = await prisma.assessmentAttempt.findUnique({
+          where: { id: attemptId },
+          include: {
+            questions: { orderBy: { questionIndex: 'asc' } },
+            answers: true,
+            workerProfile: {
+              select: { id: true, name: true, email: true, trade: true }
+            }
+          }
+        });
+      } else if (activeParam === 'true') {
+        let workerProfileId: string | null = null;
+        try {
+          const auth = await resolveAuthenticatedWorker(req);
+          workerProfileId = auth.workerProfile.id;
+        } catch {
+          const firstWorker = await prisma.workerProfile.findFirst();
+          workerProfileId = firstWorker?.id || null;
+        }
+
+        if (workerProfileId) {
+          attempt = await prisma.assessmentAttempt.findFirst({
+            where: {
+              workerProfileId,
+              status: 'IN_PROGRESS'
+            },
+            orderBy: { createdAt: 'desc' },
+            include: {
+              questions: { orderBy: { questionIndex: 'asc' } },
+              answers: true,
+              workerProfile: {
+                select: { id: true, name: true, email: true, trade: true }
+              }
+            }
+          });
+        }
+      }
 
       if (!attempt) {
         sendJsonResponse(res, 404, { success: false, error: 'Attempt not found.' });
@@ -2954,27 +3134,34 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
 
       const isCompleted = attempt.status === 'COMPLETED';
 
-      // Security: Only send correctAnswer and explanation if assessment is completed
-      const questions = attempt.questions.map((q) => {
-        const ans = attempt.answers.find((a) => a.questionId === q.id);
+      // Build answers map and question review/client format
+      const answersMap: Record<string, number> = {};
+      const questions = attempt.questions.map((q: any) => {
+        const ans = attempt.answers.find((a: any) => a.questionId === q.id);
+        const selected = ans !== undefined ? ans.selectedAnswer : -1;
+        if (selected >= 0) {
+          answersMap[q.id] = selected;
+        }
+
         const base = {
           id: q.id,
           questionIndex: q.questionIndex,
           question: q.question,
           options: q.options,
           category: q.category,
-          difficulty: q.difficulty
+          difficulty: q.difficulty,
+          selectedAnswer: selected
         };
 
         if (isCompleted) {
           return {
             ...base,
-            selectedAnswer: ans !== undefined ? ans.selectedAnswer : -1,
             correctAnswer: q.correctAnswer,
             isCorrect: ans?.isCorrect ?? false,
             explanation: q.explanation
           };
         }
+        // Correct answer and explanation remain strictly hidden until completed
         return base;
       });
 
@@ -2992,7 +3179,8 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
           systemIndicator: attempt.systemIndicator,
           categoryScores: attempt.categoryScores,
           aiSummary: attempt.aiSummary,
-          timeSpentSeconds: attempt.timeSpentSeconds,
+          timeSpentSeconds: attempt.timeSpentSeconds || 0,
+          timerLimitSeconds: attempt.timerLimitSeconds || 600,
           startedAt: attempt.startedAt,
           submittedAt: attempt.submittedAt,
           assessorDecision: attempt.assessorDecision,
@@ -3000,6 +3188,8 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
           assessorReviewedAt: attempt.assessorReviewedAt,
           worker: attempt.workerProfile
         },
+        answers: answersMap,
+        answeredCount: Object.keys(answersMap).length,
         questions
       });
       return true;

@@ -19,9 +19,9 @@ export async function generateRplChatResponse(request: ChatRequest): Promise<Cha
   const ai = getGeminiClient();
   const model = getGeminiModel();
 
-  // Convert validated history items to Gemini contents format (limit to last 8 messages)
+  // Convert validated history items to Gemini contents format (limit to last 6 messages)
   const contents: GeminiContentMessage[] = [];
-  const MAX_HISTORY_MESSAGES = 8;
+  const MAX_HISTORY_MESSAGES = 6;
 
   if (request.history && request.history.length > 0) {
     const recentHistory = request.history.slice(-MAX_HISTORY_MESSAGES);
@@ -56,49 +56,48 @@ export async function generateRplChatResponse(request: ChatRequest): Promise<Cha
   });
 
   const primaryModel = model;
-  const modelsToTry = [primaryModel, 'gemini-3.5-flash', 'gemini-flash-latest'].filter(
-    (m, idx, arr) => arr.indexOf(m) === idx
-  );
-
+  const requestStartTime = Date.now();
   let lastError: any = null;
   let replyText: string | undefined;
 
-  for (const currentModel of modelsToTry) {
-    const maxAttempts = currentModel === primaryModel ? 2 : 1;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const response = await ai.models.generateContent({
-          model: currentModel,
-          contents,
-          config: {
-            systemInstruction: RPL_SYSTEM_INSTRUCTION,
-            temperature: 0.65,
-            maxOutputTokens: 2048
-          }
-        });
+  // Execute exactly one Gemini generation request with 18-second timeout
+  const TIMEOUT_MS = 18000;
+  const geminiStartTime = Date.now();
 
-        replyText = response.text?.trim();
-        if (replyText) {
-          break;
-        }
-      } catch (error: any) {
-        lastError = error;
-        const errMsg = error?.message || String(error);
-        const isQuotaExceeded = errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota exceeded');
-        const isTransient = errMsg.includes('503') || errMsg.includes('UNAVAILABLE') || errMsg.includes('high demand');
-
-        if (isQuotaExceeded) {
-          break;
-        }
-
-        if (isTransient && attempt < maxAttempts) {
-          await new Promise((resolve) => setTimeout(resolve, attempt * 1000 + 200));
-          continue;
-        }
-
-        break;
+  try {
+    const generatePromise = ai.models.generateContent({
+      model: primaryModel,
+      contents,
+      config: {
+        systemInstruction: RPL_SYSTEM_INSTRUCTION,
+        temperature: 0.5,
+        maxOutputTokens: 600
       }
-    }
+    });
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      const timer = setTimeout(() => {
+        const timeoutErr = new Error('AI request timed out. Please ask a shorter question or try again.') as Error & {
+          status?: number;
+          code?: string;
+        };
+        timeoutErr.status = 504;
+        timeoutErr.code = 'TIMEOUT';
+        reject(timeoutErr);
+      }, TIMEOUT_MS);
+      if (typeof timer.unref === 'function') timer.unref();
+    });
+
+    const response = await Promise.race([generatePromise, timeoutPromise]);
+    const geminiEndTime = Date.now();
+    const geminiMs = geminiEndTime - geminiStartTime;
+    const totalMs = Date.now() - requestStartTime;
+
+    replyText = response.text?.trim();
+
+    console.log(
+      `[AI_TIMING] model=${primaryModel} | geminiMs=${geminiMs}ms | totalMs=${totalMs}ms | outputLength=${replyText?.length || 0}`
+    );
 
     if (replyText) {
       return {
@@ -106,6 +105,8 @@ export async function generateRplChatResponse(request: ChatRequest): Promise<Cha
         message: replyText
       };
     }
+  } catch (error: any) {
+    lastError = error;
   }
 
   // Handle final error if all attempts exhausted

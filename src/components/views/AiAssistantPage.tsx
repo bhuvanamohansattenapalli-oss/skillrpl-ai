@@ -132,9 +132,12 @@ export const AiAssistantPage: React.FC = () => {
       textareaRef.current.style.height = 'auto';
     }
 
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => abortController.abort(), 22000);
+
     try {
-      // 2. Prepare conversation history for multi-turn Gemini reasoning
-      const historyPayload = messages.slice(-10).map((msg) => ({
+      // 2. Prepare conversation history for multi-turn Gemini reasoning (last 6 messages max)
+      const historyPayload = messages.slice(-6).map((msg) => ({
         role: msg.sender === 'user' ? ('user' as const) : ('assistant' as const),
         content: msg.text
       }));
@@ -145,11 +148,14 @@ export const AiAssistantPage: React.FC = () => {
         headers: {
           'Content-Type': 'application/json'
         },
+        signal: abortController.signal,
         body: JSON.stringify({
           message: text,
           history: historyPayload
         })
       });
+
+      clearTimeout(timeoutId);
 
       let data: any = null;
       let rawText = '';
@@ -205,10 +211,14 @@ export const AiAssistantPage: React.FC = () => {
         };
         setMessages((prev) => [...prev, aiMsg]);
       }
-    } catch (error) {
+    } catch (error: any) {
+      clearTimeout(timeoutId);
       console.error('Chat request failed:', error);
       const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-      const networkMsg = isOffline
+      const isTimeout = error?.name === 'AbortError';
+      const networkMsg = isTimeout
+        ? 'AI Assistant request timed out. Please try asking again.'
+        : isOffline
         ? 'Network connection error. Please check your internet connection and try again.'
         : 'AI Assistant is temporarily unavailable. Please try again.';
       const aiMsg: ChatMessage = {
@@ -997,8 +1007,8 @@ export const AiAssistantPage: React.FC = () => {
                 }}
                 className="ai-send-btn"
               >
-                <span>Send</span>
-                <Send size={14} />
+                <span>{isTyping ? 'Thinking...' : 'Send'}</span>
+                {isTyping ? <RefreshCw size={14} className="animate-spin" /> : <Send size={14} />}
               </button>
             </div>
 
