@@ -129,13 +129,17 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
   const vercelRoute = parsedUrl.searchParams.get('__route');
   if (vercelRoute) {
     const cleanRoute = vercelRoute.startsWith('/') ? vercelRoute : `/${vercelRoute}`;
-    pathname = cleanRoute.startsWith('/api/') ? cleanRoute : `/api${cleanRoute}`;
+    if (cleanRoute === '/api' || cleanRoute.startsWith('/api/')) {
+      pathname = cleanRoute;
+    } else {
+      pathname = `/api${cleanRoute}`;
+    }
   } else {
     const matchedPath =
       (req.headers['x-matched-path'] as string) ||
       (req.headers['x-vercel-matched-path'] as string) ||
       (req.headers['x-forwarded-uri'] as string);
-    if (matchedPath && matchedPath.startsWith('/api/')) {
+    if (matchedPath && (matchedPath === '/api' || matchedPath.startsWith('/api/'))) {
       pathname = matchedPath.split('?')[0];
     } else if ((req as any).query?.path) {
       const qPath = (req as any).query.path;
@@ -2463,7 +2467,11 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
   // =========================================================================
 
   // 13.1 Start 10-MCQ Assessment: POST /api/assessment/start
-  if (pathname === '/api/assessment/start' && req.method === 'POST') {
+  if (pathname === '/api/assessment/start') {
+    if (req.method !== 'POST') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use POST.' });
+      return true;
+    }
     try {
       const body = (await parseRequestBody(req)) as {
         topic?: string;
@@ -2574,7 +2582,11 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
   }
 
   // 13.2 Submit 10-MCQ Assessment: POST /api/assessment/submit
-  if (pathname === '/api/assessment/submit' && req.method === 'POST') {
+  if (pathname === '/api/assessment/submit') {
+    if (req.method !== 'POST') {
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed. Use POST.' });
+      return true;
+    }
     try {
       const body = (await parseRequestBody(req)) as {
         attemptId?: string;
@@ -2998,11 +3010,20 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
   }
 
-  // 13.4 List Worker Attempts: GET /api/assessment/worker-attempts
-  if (pathname === '/api/assessment/worker-attempts' && req.method === 'GET') {
+  // 13.4 List Worker Attempts: GET/POST /api/assessment/worker-attempts
+  if (pathname === '/api/assessment/worker-attempts' && (req.method === 'GET' || req.method === 'POST')) {
     try {
       const { prisma } = await import('../lib/db.js');
       let workerProfileId = parsedUrl.searchParams.get('workerProfileId');
+
+      if (!workerProfileId && req.method === 'POST') {
+        try {
+          const body = (await parseRequestBody(req)) as { workerProfileId?: string } | null | undefined;
+          if (body?.workerProfileId) workerProfileId = body.workerProfileId;
+        } catch {
+          // ignore
+        }
+      }
 
       if (!workerProfileId) {
         try {
@@ -3086,8 +3107,8 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
   }
 
-  // 13.6 Assessor List of MCQ Assessments: GET /api/assessor/mcq-assessments
-  if (pathname === '/api/assessor/mcq-assessments' && req.method === 'GET') {
+  // 13.6 Assessor List of MCQ Assessments: GET/POST /api/assessor/mcq-assessments
+  if (pathname === '/api/assessor/mcq-assessments' && (req.method === 'GET' || req.method === 'POST')) {
     try {
       const { prisma } = await import('../lib/db.js');
       const attempts = await prisma.assessmentAttempt.findMany({

@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
         name: 'api-server-middleware',
         configureServer(server) {
           server.middlewares.use(async (req, res, next) => {
-            if (req.url && req.url.startsWith('/api/')) {
+            if (req.url && (req.url === '/api' || req.url.startsWith('/api/') || req.url.startsWith('/api?'))) {
               try {
                 const handled = await handleApiRoute(req, res);
                 if (handled) return;
@@ -36,7 +36,7 @@ export default defineConfig(({ mode }) => {
         },
         configurePreviewServer(server) {
           server.middlewares.use(async (req, res, next) => {
-            if (req.url && req.url.startsWith('/api/')) {
+            if (req.url && (req.url === '/api' || req.url.startsWith('/api/') || req.url.startsWith('/api?'))) {
               try {
                 const handled = await handleApiRoute(req, res);
                 if (handled) return;
