@@ -85,7 +85,7 @@ export interface SubmitAssessmentResult {
 }
 
 /**
- * Gets authentication headers with Supabase bearer token if available.
+ * Gets authentication headers with Supabase bearer token or demo user headers.
  */
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const headers: Record<string, string> = {
@@ -102,6 +102,25 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
   } catch {
     // Non-blocking
   }
+
+  // If no Supabase Bearer token, check for demo user session in localStorage
+  if (!headers['Authorization'] && typeof window !== 'undefined') {
+    try {
+      const savedDemoUser = localStorage.getItem('skillrpl_demo_user');
+      if (savedDemoUser) {
+        const parsed = JSON.parse(savedDemoUser);
+        if (parsed?.email) {
+          headers['x-demo-user'] = parsed.email;
+          headers['x-demo-role'] = parsed.role || 'WORKER';
+          if (parsed.name) headers['x-demo-name'] = parsed.name;
+          if (parsed.trade) headers['x-demo-trade'] = parsed.trade;
+        }
+      }
+    } catch {
+      // Non-blocking
+    }
+  }
+
   return headers;
 }
 
@@ -149,7 +168,7 @@ export async function startMCQAssessment(
     }
 
     const data = await res.json();
-    if (data.success && data.questions?.length === 10) {
+    if (data.success && data.questions?.length === 10 && data.attemptId) {
       // Save active attempt for offline resilience during the test
       const offlineAttempt: OfflineAttemptData = {
         attemptId: data.attemptId,
@@ -163,6 +182,16 @@ export async function startMCQAssessment(
       };
       saveActiveAttempt(offlineAttempt);
 
+      // Persist attemptId in sessionStorage to survive component remounts & page reloads
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        try {
+          sessionStorage.setItem('skillrpl_assessment_attempt_id', data.attemptId);
+          sessionStorage.setItem('skillrpl_assessment_topic', data.topic);
+        } catch (e) {
+          console.warn('[MCQ API] Failed to write to sessionStorage:', e);
+        }
+      }
+
       return data as StartAssessmentResult;
     }
 
@@ -170,6 +199,14 @@ export async function startMCQAssessment(
   } catch (error) {
     console.warn('[MCQ API] Server start failed, falling back to local question bank:', (error as Error).message);
     const offlineData = createOfflineAttemptLocally(sanitizedTopic);
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      try {
+        sessionStorage.setItem('skillrpl_assessment_attempt_id', offlineData.attemptId);
+        sessionStorage.setItem('skillrpl_assessment_topic', offlineData.topic);
+      } catch {
+        // Non-blocking
+      }
+    }
     return {
       success: true,
       attemptId: offlineData.attemptId,
@@ -195,12 +232,34 @@ export async function submitMCQAssessment(
   timeSpentSeconds: number = 0,
   topic?: string
 ): Promise<SubmitAssessmentResult> {
-  const activeTopic = topic || getActiveAttempt()?.topic || 'Electrician';
+  // Resolve stable attemptId from argument, sessionStorage, or active attempt
+  let stableAttemptId = (attemptId || '').trim();
+  if (!stableAttemptId && typeof window !== 'undefined' && window.sessionStorage) {
+    stableAttemptId = (sessionStorage.getItem('skillrpl_assessment_attempt_id') || '').trim();
+  }
+  if (!stableAttemptId) {
+    const active = getActiveAttempt();
+    if (active?.attemptId) {
+      stableAttemptId = active.attemptId.trim();
+    }
+  }
+
+  if (!stableAttemptId) {
+    throw new Error('Assessment attempt not found. Please start a new assessment.');
+  }
+
+  let activeTopic = (topic || '').trim();
+  if (!activeTopic && typeof window !== 'undefined' && window.sessionStorage) {
+    activeTopic = (sessionStorage.getItem('skillrpl_assessment_topic') || '').trim();
+  }
+  if (!activeTopic) {
+    activeTopic = getActiveAttempt()?.topic || 'Electrician';
+  }
 
   if (!isOnline()) {
     // Queue offline submission
     queueOfflineSubmission({
-      attemptId,
+      attemptId: stableAttemptId,
       topic: activeTopic,
       answers,
       timeSpentSeconds,
@@ -209,17 +268,25 @@ export async function submitMCQAssessment(
     });
 
     clearActiveAttempt();
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      try {
+        sessionStorage.removeItem('skillrpl_assessment_attempt_id');
+        sessionStorage.removeItem('skillrpl_assessment_topic');
+      } catch {
+        // Non-blocking
+      }
+    }
 
     return {
       success: true,
       message: 'Assessment completed offline. Answers saved locally and will sync when internet reconnects.',
       isOfflineQueued: true,
-      attemptId,
+      attemptId: stableAttemptId,
       score: 0,
       totalQuestions: 10,
       percentage: 0,
       attempt: {
-        id: attemptId,
+        id: stableAttemptId,
         topic: activeTopic,
         status: 'COMPLETED_OFFLINE',
         score: 0,
@@ -243,7 +310,7 @@ export async function submitMCQAssessment(
     method: 'POST',
     headers,
     body: JSON.stringify({
-      attemptId,
+      attemptId: stableAttemptId,
       answers,
       timeSpentSeconds,
       topic: activeTopic
@@ -272,6 +339,14 @@ export async function submitMCQAssessment(
 
   const data = await res.json();
   clearActiveAttempt();
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      sessionStorage.removeItem('skillrpl_assessment_attempt_id');
+      sessionStorage.removeItem('skillrpl_assessment_topic');
+    } catch {
+      // Non-blocking
+    }
+  }
   return data as SubmitAssessmentResult;
 }
 

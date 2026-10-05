@@ -89,15 +89,25 @@ export const AssessmentPage: React.FC = () => {
     };
   }, []);
 
-  // Check for active in-progress attempt in localStorage
+  // Check for active in-progress attempt in localStorage or sessionStorage
   useEffect(() => {
+    let sessionAttemptId = '';
+    let sessionTopic = '';
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      sessionAttemptId = sessionStorage.getItem('skillrpl_assessment_attempt_id') || '';
+      sessionTopic = sessionStorage.getItem('skillrpl_assessment_topic') || '';
+    }
+
     const active = getActiveAttempt();
+    const effectiveAttemptId = sessionAttemptId || active?.attemptId || '';
+
     if (active && active.questions?.length === 10) {
-      setAttemptId(active.attemptId);
-      setSelectedTopic(active.topic);
+      const idToUse = effectiveAttemptId || active.attemptId;
+      setAttemptId(idToUse);
+      setSelectedTopic(sessionTopic || active.topic);
       setQuestions(active.questions);
       setAnswers(active.answers || {});
-      const saved = loadAutosavedAnswers(active.attemptId);
+      const saved = loadAutosavedAnswers(idToUse);
       if (saved) {
         setAnswers(saved.answers || {});
         timeSpentRef.current = saved.timeSpentSeconds || 0;
@@ -119,8 +129,9 @@ export const AssessmentPage: React.FC = () => {
       setTimeRemaining((prev) => {
         timeSpentRef.current += 1;
         // Autosave every second spent
-        if (attemptId && timeSpentRef.current % 5 === 0) {
-          autosaveAnswers(attemptId, answers, timeSpentRef.current);
+        const currentId = attemptId || (typeof window !== 'undefined' ? sessionStorage.getItem('skillrpl_assessment_attempt_id') : '') || '';
+        if (currentId && timeSpentRef.current % 5 === 0) {
+          autosaveAnswers(currentId, answers, timeSpentRef.current);
         }
 
         if (prev <= 1) {
@@ -157,6 +168,14 @@ export const AssessmentPage: React.FC = () => {
       const res = await startMCQAssessment(finalTopic);
       if (res.success && res.questions.length === 10) {
         setAttemptId(res.attemptId);
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          try {
+            sessionStorage.setItem('skillrpl_assessment_attempt_id', res.attemptId);
+            sessionStorage.setItem('skillrpl_assessment_topic', res.topic);
+          } catch {
+            // Non-blocking
+          }
+        }
         setSelectedTopic(res.topic);
         setQuestions(res.questions);
         setCurrentIndex(0);
@@ -190,7 +209,10 @@ export const AssessmentPage: React.FC = () => {
       [currentQId]: optionIndex
     };
     setAnswers(updated);
-    autosaveAnswers(attemptId, updated, timeSpentRef.current);
+    const activeId = attemptId || (typeof window !== 'undefined' ? sessionStorage.getItem('skillrpl_assessment_attempt_id') : '') || '';
+    if (activeId) {
+      autosaveAnswers(activeId, updated, timeSpentRef.current);
+    }
   };
 
   // Submission handler
@@ -203,13 +225,33 @@ export const AssessmentPage: React.FC = () => {
       if (!confirmSubmit) return;
     }
 
+    const currentAttemptId = (
+      attemptId ||
+      (typeof window !== 'undefined' ? sessionStorage.getItem('skillrpl_assessment_attempt_id') : '') ||
+      getActiveAttempt()?.attemptId ||
+      ''
+    ).trim();
+
+    if (!currentAttemptId) {
+      showToast('Assessment attempt ID was lost. Please restart the test.', 'error');
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const res = await submitMCQAssessment(attemptId, answers, timeSpentRef.current, selectedTopic);
+      const res = await submitMCQAssessment(currentAttemptId, answers, timeSpentRef.current, selectedTopic);
       if (res.success) {
         setAttemptResult(res.attempt);
         setQuestionReview(res.questionReview || []);
         clearActiveAttempt();
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          try {
+            sessionStorage.removeItem('skillrpl_assessment_attempt_id');
+            sessionStorage.removeItem('skillrpl_assessment_topic');
+          } catch {
+            // Non-blocking
+          }
+        }
         setScreenMode('COMPLETED_RESULT');
         showToast('Assessment submitted successfully!', 'success');
       } else {
@@ -225,13 +267,33 @@ export const AssessmentPage: React.FC = () => {
   // Auto-submit when timer reaches zero
   const handleAutoSubmitOnTimeout = useCallback(async () => {
     showToast('Time is up! Automatically submitting your answers...', 'warning');
+    const currentAttemptId = (
+      attemptId ||
+      (typeof window !== 'undefined' ? sessionStorage.getItem('skillrpl_assessment_attempt_id') : '') ||
+      getActiveAttempt()?.attemptId ||
+      ''
+    ).trim();
+
+    if (!currentAttemptId) {
+      showToast('Assessment attempt ID was lost during timeout.', 'error');
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const res = await submitMCQAssessment(attemptId, answers, timeSpentRef.current, selectedTopic);
+      const res = await submitMCQAssessment(currentAttemptId, answers, timeSpentRef.current, selectedTopic);
       if (res.success) {
         setAttemptResult(res.attempt);
         setQuestionReview(res.questionReview || []);
         clearActiveAttempt();
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          try {
+            sessionStorage.removeItem('skillrpl_assessment_attempt_id');
+            sessionStorage.removeItem('skillrpl_assessment_topic');
+          } catch {
+            // Non-blocking
+          }
+        }
         setScreenMode('COMPLETED_RESULT');
       }
     } catch (err: any) {
