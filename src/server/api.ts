@@ -137,7 +137,23 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       (req.headers['x-forwarded-uri'] as string);
     if (matchedPath && matchedPath.startsWith('/api/')) {
       pathname = matchedPath.split('?')[0];
+    } else if ((req as any).query?.path) {
+      const qPath = (req as any).query.path;
+      const joined = Array.isArray(qPath) ? qPath.join('/') : String(qPath);
+      pathname = `/api/${joined.replace(/^\//, '')}`;
+    } else if (pathname.includes('[...path]')) {
+      const pathParams = parsedUrl.searchParams.getAll('path');
+      if (pathParams.length > 0) {
+        pathname = `/api/${pathParams.join('/')}`;
+      }
+    } else if (typeof (req as any).path === 'string' && (req as any).path.startsWith('/api/')) {
+      pathname = (req as any).path;
     }
+  }
+
+  // Normalize: remove trailing slash if not root
+  if (pathname.length > 1 && pathname.endsWith('/')) {
+    pathname = pathname.slice(0, -1);
   }
 
   // 1. Health check endpoint: GET /api/health

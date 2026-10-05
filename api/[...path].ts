@@ -1,13 +1,15 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { handleApiRoute } from '../../src/server/api.js';
+import { handleApiRoute } from '../src/server/api.js';
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   try {
     const handled = await handleApiRoute(req, res);
-    if (!handled && !res.writableEnded) {
+    if (handled) return;
+
+    if (!res.writableEnded) {
       res.statusCode = 404;
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      res.end(JSON.stringify({ success: false, error: 'Assessment attempt endpoint not found.' }));
+      res.end(JSON.stringify({ success: false, error: 'API route not found.' }));
     }
   } catch (error: any) {
     if (!res.writableEnded) {
