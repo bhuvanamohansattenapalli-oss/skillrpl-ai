@@ -47,6 +47,44 @@ const SUGGESTION_CARDS = [
   }
 ];
 
+const STATIC_RPL_FALLBACKS: Array<{ keywords: string[]; answer: string }> = [
+  {
+    keywords: ['what is rpl', 'define rpl', 'rpl meaning', 'rpl explanation', 'about rpl'],
+    answer:
+      'Recognition of Prior Learning (RPL) is a key component of the National Skills Qualifications Framework (NSQF) under the Ministry of Skill Development and Entrepreneurship (MSDE). It assesses, evaluates, and certifies existing skills, work experience, and informal learning of candidate workers without requiring formal classroom training.'
+  },
+  {
+    keywords: ['what is nsqf', 'define nsqf', 'nsqf level', 'nsqf meaning', 'qualification framework'],
+    answer:
+      'The National Skills Qualifications Framework (NSQF) is a competency-based framework that organizes qualifications according to levels of knowledge, skills, and aptitude (Levels 1 to 10) recognized nationally across industries in India.'
+  },
+  {
+    keywords: ['evidence', 'what evidence', 'documents required', 'upload evidence', 'proof of work'],
+    answer:
+      'Recommended RPL evidence includes: 1) Photos or video clips of you executing trade tasks, 2) Employer work certificates or experience letters, 3) Photos of completed panels, installations, or job sites, and 4) Self-declared skill checklist details.'
+  },
+  {
+    keywords: ['how does assessment work', 'assessment process', 'how assessment works', 'steps in assessment'],
+    answer:
+      'The SkillRPL Assessment workflow consists of 4 simple steps: 1) Self-Declaration of trade experience and skills, 2) 10-Question MCQ Knowledge Assessment, 3) Practical task & evidence submission, and 4) Final verification by an Accredited Assessor.'
+  },
+  {
+    keywords: ['can ai replace', 'ai replace assessor', 'replace human assessor', 'is ai the assessor', 'ai assessor'],
+    answer:
+      'No. SkillRPL AI provides diagnostic scoring, question generation, and mapping assistance. All official RPL qualification decisions and certifications are made exclusively by accredited human assessors.'
+  }
+];
+
+function getClientRplFallback(prompt: string): string | null {
+  const lower = (prompt || '').toLowerCase().trim();
+  for (const item of STATIC_RPL_FALLBACKS) {
+    if (item.keywords.some((kw) => lower.includes(kw))) {
+      return item.answer;
+    }
+  }
+  return null;
+}
+
 // Quick actions below input
 const QUICK_ACTIONS = [
   'Understand RPL',
@@ -177,29 +215,29 @@ export const AiAssistantPage: React.FC = () => {
         setMessages((prev) => [...prev, aiMsg]);
       } else {
         const statusCode = data?.status || response.status;
-        const errorCode = data?.code;
-        const modelName = data?.model || 'gemini-3.6-flash';
+        const fallbackAnswer = getClientRplFallback(text);
         let errorMessage = data?.error;
 
-        if (errorMessage) {
-          // Preserve specific diagnostic error returned from server
-          if (errorCode && !errorMessage.includes(errorCode)) {
-            errorMessage = `[${errorCode}] ${errorMessage}`;
+        if (fallbackAnswer) {
+          errorMessage = `${fallbackAnswer}\n\n*(Note: Knowledge base response served while Gemini service is unavailable.)*`;
+        } else if (errorMessage) {
+          if (statusCode === 429 || errorMessage.includes('429') || errorMessage.includes('quota')) {
+            errorMessage = 'AI is temporarily unavailable because the AI service quota has been reached. Your assessment data is safe. Please try again later.';
           }
         } else if (rawText && !rawText.trim().startsWith('<')) {
-          // Extract plain-text error from server instead of masking
           const safeText = rawText.trim().slice(0, 200);
-          errorMessage = `[HTTP ${statusCode}] ${safeText}`;
+          errorMessage = statusCode === 429
+            ? 'AI is temporarily unavailable because the AI service quota has been reached. Your assessment data is safe. Please try again later.'
+            : `[HTTP ${statusCode}] ${safeText}`;
         } else {
-          // Fallback only when response body has no diagnostic error
           if (statusCode === 429) {
-            errorMessage = `[HTTP 429 - RATE_LIMIT_EXCEEDED] AI request quota exceeded for '${modelName}'. Please wait before retrying.`;
+            errorMessage = 'AI is temporarily unavailable because the AI service quota has been reached. Your assessment data is safe. Please try again later.';
           } else if (statusCode === 401 || statusCode === 403) {
             errorMessage = `[HTTP ${statusCode} - AUTH_FAILED] AI service authentication failed. Verify GEMINI_API_KEY in deployment environment.`;
           } else if (statusCode === 404) {
-            errorMessage = `[HTTP 404 - NOT_FOUND] API route or model '${modelName}' not found. Check deployment API routing and GEMINI_MODEL.`;
+            errorMessage = `[HTTP 404 - NOT_FOUND] API route or model not found. Check deployment API routing.`;
           } else {
-            errorMessage = `[HTTP ${statusCode}] AI Assistant is temporarily unavailable. Please try again.`;
+            errorMessage = 'AI is temporarily unavailable. Your assessment data is safe. Please try again later.';
           }
         }
 
@@ -216,11 +254,18 @@ export const AiAssistantPage: React.FC = () => {
       console.error('Chat request failed:', error);
       const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
       const isTimeout = error?.name === 'AbortError';
-      const networkMsg = isTimeout
+
+      const fallbackAnswer = getClientRplFallback(text);
+      let networkMsg = isTimeout
         ? 'AI Assistant request timed out. Please try asking again.'
         : isOffline
         ? 'Network connection error. Please check your internet connection and try again.'
-        : 'AI Assistant is temporarily unavailable. Please try again.';
+        : 'AI is temporarily unavailable. Your assessment data is safe. Please try again later.';
+
+      if (fallbackAnswer) {
+        networkMsg = `${fallbackAnswer}\n\n*(Note: Knowledge base response served while Gemini service is unavailable.)*`;
+      }
+
       const aiMsg: ChatMessage = {
         id: `msg-${Date.now() + 1}`,
         sender: 'ai',
@@ -229,7 +274,6 @@ export const AiAssistantPage: React.FC = () => {
       };
       setMessages((prev) => [...prev, aiMsg]);
     } finally {
-      // 5. Remove typing indicator
       setIsTyping(false);
     }
   };

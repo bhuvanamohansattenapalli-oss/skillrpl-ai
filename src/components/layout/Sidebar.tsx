@@ -376,7 +376,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onCloseMobile }) => {
 
         {/* 4. My Assessments */}
         <button
-          onClick={() => navigateTo('declaration')}
+          onClick={() => navigateTo('assessment')}
           style={navItemStyle(isItemActive('my-assessments'))}
           className="sidebar-btn"
         >

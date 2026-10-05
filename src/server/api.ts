@@ -2926,7 +2926,10 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         },
         include: {
           questions: { orderBy: { questionIndex: 'asc' } },
-          answers: true
+          answers: true,
+          workerProfile: {
+            select: { id: true, name: true, email: true, trade: true }
+          }
         }
       });
 
@@ -2959,6 +2962,8 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         attempt: {
           id: updatedAttempt.id,
           topic: updatedAttempt.topic,
+          trade: updatedAttempt.trade || updatedAttempt.topic,
+          status: updatedAttempt.status,
           score: updatedAttempt.score,
           totalQuestions: updatedAttempt.totalQuestions,
           percentage: updatedAttempt.percentage,
@@ -2967,8 +2972,13 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
           systemIndicator: updatedAttempt.systemIndicator,
           categoryScores: updatedAttempt.categoryScores,
           aiSummary: updatedAttempt.aiSummary,
+          timeSpentSeconds: updatedAttempt.timeSpentSeconds || 0,
+          startedAt: updatedAttempt.startedAt,
           submittedAt: updatedAttempt.submittedAt,
-          timeSpentSeconds: updatedAttempt.timeSpentSeconds
+          assessorDecision: updatedAttempt.assessorDecision,
+          assessorNotes: updatedAttempt.assessorNotes,
+          assessorReviewedAt: updatedAttempt.assessorReviewedAt,
+          worker: updatedAttempt.workerProfile
         },
         questionReview
       });

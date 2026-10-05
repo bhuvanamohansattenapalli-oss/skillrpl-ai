@@ -11,11 +11,51 @@ interface GeminiContentMessage {
   parts: GeminiContentPart[];
 }
 
+const STATIC_RPL_KNOWLEDGE: Array<{ keywords: string[]; answer: string }> = [
+  {
+    keywords: ['what is rpl', 'define rpl', 'rpl meaning', 'rpl explanation', 'about rpl'],
+    answer:
+      'Recognition of Prior Learning (RPL) is a key component of the National Skills Qualifications Framework (NSQF) under the Ministry of Skill Development and Entrepreneurship (MSDE). It assesses, evaluates, and certifies existing skills, work experience, and informal learning of candidate workers without requiring formal classroom training.'
+  },
+  {
+    keywords: ['what is nsqf', 'define nsqf', 'nsqf level', 'nsqf meaning', 'qualification framework'],
+    answer:
+      'The National Skills Qualifications Framework (NSQF) is a competency-based framework that organizes qualifications according to levels of knowledge, skills, and aptitude (Levels 1 to 10) recognized nationally across industries in India.'
+  },
+  {
+    keywords: ['evidence', 'what evidence', 'documents required', 'upload evidence', 'proof of work'],
+    answer:
+      'Recommended RPL evidence includes: 1) Photos or video clips of you executing trade tasks, 2) Employer work certificates or experience letters, 3) Photos of completed panels, installations, or job sites, and 4) Self-declared skill checklist details.'
+  },
+  {
+    keywords: ['how does assessment work', 'assessment process', 'how assessment works', 'steps in assessment'],
+    answer:
+      'The SkillRPL Assessment workflow consists of 4 simple steps: 1) Self-Declaration of trade experience and skills, 2) 10-Question MCQ Knowledge Assessment, 3) Practical task & evidence submission, and 4) Final verification by an Accredited Assessor.'
+  },
+  {
+    keywords: ['can ai replace', 'ai replace assessor', 'replace human assessor', 'is ai the assessor', 'ai assessor'],
+    answer:
+      'No. SkillRPL AI provides diagnostic scoring, question generation, and mapping assistance. All official RPL qualification decisions and certifications are made exclusively by accredited human assessors.'
+  }
+];
+
+export function getDeterministicRplFallback(prompt: string): string | null {
+  const lower = (prompt || '').toLowerCase().trim();
+  for (const item of STATIC_RPL_KNOWLEDGE) {
+    if (item.keywords.some((kw) => lower.includes(kw))) {
+      return item.answer;
+    }
+  }
+  return null;
+}
+
 /**
  * Generates an RPL assistant response using the Gemini API.
  * Formats multi-turn chat history and enforces RPL safety guidelines.
  */
 export async function generateRplChatResponse(request: ChatRequest): Promise<ChatSuccessResponse> {
+  const userPrompt = request.message.trim();
+
   const ai = getGeminiClient();
   const model = getGeminiModel();
 
@@ -52,64 +92,84 @@ export async function generateRplChatResponse(request: ChatRequest): Promise<Cha
   // Append current user message
   contents.push({
     role: 'user',
-    parts: [{ text: request.message.trim() }]
+    parts: [{ text: userPrompt }]
   });
 
   const primaryModel = model;
-  const requestStartTime = Date.now();
+  const TIMEOUT_MS = 18000;
   let lastError: any = null;
   let replyText: string | undefined;
 
-  // Execute exactly one Gemini generation request with 18-second timeout
-  const TIMEOUT_MS = 18000;
-  const geminiStartTime = Date.now();
+  // Maximum 1 retry ONLY for 503 SERVICE_UNAVAILABLE
+  const maxAttempts = 2;
 
-  try {
-    const generatePromise = ai.models.generateContent({
-      model: primaryModel,
-      contents,
-      config: {
-        systemInstruction: RPL_SYSTEM_INSTRUCTION,
-        temperature: 0.5,
-        maxOutputTokens: 600
-      }
-    });
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const geminiStartTime = Date.now();
+      const generatePromise = ai.models.generateContent({
+        model: primaryModel,
+        contents,
+        config: {
+          systemInstruction: RPL_SYSTEM_INSTRUCTION,
+          temperature: 0.5,
+          maxOutputTokens: 600
+        }
+      });
 
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      const timer = setTimeout(() => {
-        const timeoutErr = new Error('AI request timed out. Please ask a shorter question or try again.') as Error & {
-          status?: number;
-          code?: string;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        const timer = setTimeout(() => {
+          const timeoutErr = new Error('AI request timed out. Please ask a shorter question or try again.') as Error & {
+            status?: number;
+            code?: string;
+          };
+          timeoutErr.status = 504;
+          timeoutErr.code = 'TIMEOUT';
+          reject(timeoutErr);
+        }, TIMEOUT_MS);
+        if (typeof timer.unref === 'function') timer.unref();
+      });
+
+      const response = await Promise.race([generatePromise, timeoutPromise]);
+      const geminiMs = Date.now() - geminiStartTime;
+      replyText = response.text?.trim();
+
+      console.log(
+        `[AI_TIMING] model=${primaryModel} | attempt=${attempt} | geminiMs=${geminiMs}ms | outputLength=${replyText?.length || 0}`
+      );
+
+      if (replyText) {
+        return {
+          success: true,
+          message: replyText
         };
-        timeoutErr.status = 504;
-        timeoutErr.code = 'TIMEOUT';
-        reject(timeoutErr);
-      }, TIMEOUT_MS);
-      if (typeof timer.unref === 'function') timer.unref();
-    });
+      }
+    } catch (error: any) {
+      lastError = error;
+      const errMsg = error?.message || String(error);
+      const is503 = error?.status === 503 || errMsg.includes('503') || errMsg.includes('UNAVAILABLE') || errMsg.includes('high demand');
 
-    const response = await Promise.race([generatePromise, timeoutPromise]);
-    const geminiEndTime = Date.now();
-    const geminiMs = geminiEndTime - geminiStartTime;
-    const totalMs = Date.now() - requestStartTime;
+      // Retry ONLY once for 503 SERVICE_UNAVAILABLE
+      if (is503 && attempt < maxAttempts) {
+        console.warn('[AI Assistant] 503 Service Unavailable encountered. Retrying once after 1000ms backoff...');
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        continue;
+      }
 
-    replyText = response.text?.trim();
-
-    console.log(
-      `[AI_TIMING] model=${primaryModel} | geminiMs=${geminiMs}ms | totalMs=${totalMs}ms | outputLength=${replyText?.length || 0}`
-    );
-
-    if (replyText) {
-      return {
-        success: true,
-        message: replyText
-      };
+      // Do NOT retry 429 quota errors or other status codes
+      break;
     }
-  } catch (error: any) {
-    lastError = error;
   }
 
-  // Handle final error if all attempts exhausted
+  // Check deterministic static fallback first if Gemini unavailable/rate-limited
+  const staticFallback = getDeterministicRplFallback(userPrompt);
+  if (staticFallback) {
+    return {
+      success: true,
+      message: `${staticFallback}\n\n*(Note: Knowledge base response served while Gemini service is unavailable.)*`
+    };
+  }
+
+  // Handle final error formatting
   const errorMessage = lastError?.message || String(lastError);
   const errorStatus = lastError?.status || lastError?.statusCode || 500;
 
@@ -135,7 +195,7 @@ export async function generateRplChatResponse(request: ChatRequest): Promise<Cha
   if (errorStatus === 429 || errorMessage.includes('RESOURCE_EXHAUSTED') || errorMessage.includes('quota') || errorMessage.includes('429')) {
     error.status = 429;
     error.code = 'RATE_LIMIT_EXCEEDED';
-    error.message = `AI quota limit reached for model '${primaryModel}'. Please retry shortly. (${safeMsg.slice(0, 160)})`;
+    error.message = 'AI is temporarily unavailable because the AI service quota has been reached. Your assessment data is safe. Please try again later.';
     throw error;
   }
 
@@ -160,18 +220,12 @@ export async function generateRplChatResponse(request: ChatRequest): Promise<Cha
     throw error;
   }
 
-  if (errorStatus === 400 || errorMessage.includes('INVALID_ARGUMENT')) {
-    error.status = 400;
-    error.code = 'INVALID_REQUEST';
-    error.message = `Invalid request parameters for model '${primaryModel}': ${safeMsg.slice(0, 160)}`;
-    throw error;
-  }
-
   // Default safe error
   error.status = errorStatus;
   error.code = 'SERVER_ERROR';
-  error.message = `AI service error (${errorStatus}) for model '${primaryModel}': ${safeMsg.slice(0, 160)}`;
+  error.message = `AI is temporarily unavailable (${errorStatus}). Your assessment data is safe. Please try again later.`;
   throw error;
 }
+
 
 

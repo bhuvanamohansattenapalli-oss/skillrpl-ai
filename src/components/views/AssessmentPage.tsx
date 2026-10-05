@@ -25,6 +25,10 @@ import { useApp } from '../../context/AppContext';
 import {
   startMCQAssessment,
   submitMCQAssessment,
+  getWorkerMCQAttempts,
+  getMCQAttempt,
+  getActiveAttemptServer,
+  saveSingleAnswer,
   type MCQQuestionClient,
   type MCQQuestionReview,
   type AssessmentAttemptResponse
@@ -34,7 +38,8 @@ import {
   loadAutosavedAnswers,
   getActiveAttempt,
   clearActiveAttempt,
-  isOnline
+  isOnline,
+  saveActiveAttempt
 } from '../../lib/assessment/offline-mcq';
 
 const POPULAR_TRADES = [
@@ -64,6 +69,10 @@ export const AssessmentPage: React.FC = () => {
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [sourceType, setSourceType] = useState<string>('AI_GEMINI');
 
+  // History & past attempts state
+  const [pastAttempts, setPastAttempts] = useState<AssessmentAttemptResponse[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
+
   // Timer state (Default: 600s = 10 minutes)
   const [timeRemaining, setTimeRemaining] = useState<number>(600);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -75,6 +84,19 @@ export const AssessmentPage: React.FC = () => {
   // Result state after submission
   const [attemptResult, setAttemptResult] = useState<AssessmentAttemptResponse | null>(null);
   const [questionReview, setQuestionReview] = useState<MCQQuestionReview[]>([]);
+
+  // Load database assessment history
+  const loadHistory = useCallback(async () => {
+    setLoadingHistory(true);
+    try {
+      const attempts = await getWorkerMCQAttempts();
+      setPastAttempts(attempts.filter((a) => a.status === 'COMPLETED' || a.status === 'UNDER_ASSESSMENT'));
+    } catch (err) {
+      console.warn('[AssessmentPage] Failed to load history:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  }, []);
 
   // Monitor network status
   useEffect(() => {
@@ -89,34 +111,95 @@ export const AssessmentPage: React.FC = () => {
     };
   }, []);
 
-  // Check for active in-progress attempt in localStorage or sessionStorage
+  // Restore active IN_PROGRESS assessment from database server first, then local storage
   useEffect(() => {
-    let sessionAttemptId = '';
-    let sessionTopic = '';
-    if (typeof window !== 'undefined' && window.sessionStorage) {
-      sessionAttemptId = sessionStorage.getItem('skillrpl_assessment_attempt_id') || '';
-      sessionTopic = sessionStorage.getItem('skillrpl_assessment_topic') || '';
-    }
+    let isMounted = true;
 
-    const active = getActiveAttempt();
-    const effectiveAttemptId = sessionAttemptId || active?.attemptId || '';
+    async function restoreActiveSession() {
+      // Always fetch database history
+      loadHistory();
 
-    if (active && active.questions?.length === 10) {
-      const idToUse = effectiveAttemptId || active.attemptId;
-      setAttemptId(idToUse);
-      setSelectedTopic(sessionTopic || active.topic);
-      setQuestions(active.questions);
-      setAnswers(active.answers || {});
-      const saved = loadAutosavedAnswers(idToUse);
-      if (saved) {
-        setAnswers(saved.answers || {});
-        timeSpentRef.current = saved.timeSpentSeconds || 0;
-        const remaining = Math.max(10, (active.timerLimitSeconds || 600) - (saved.timeSpentSeconds || 0));
-        setTimeRemaining(remaining);
+      // 1. Try server-side authoritative active attempt query
+      try {
+        const activeServer = await getActiveAttemptServer();
+        if (activeServer && activeServer.attempt.status === 'IN_PROGRESS' && isMounted) {
+          const att = activeServer.attempt;
+          const timeSpent = att.timeSpentSeconds || 0;
+          const limit = att.timerLimitSeconds || 600;
+          const remaining = Math.max(0, limit - timeSpent);
+
+          if (remaining <= 0) {
+            showToast('Your previous assessment attempt timer expired. Please start a new test.', 'warning');
+            clearActiveAttempt();
+            return;
+          }
+
+          setAttemptId(att.id);
+          setSelectedTopic(att.topic);
+          setQuestions(activeServer.questions);
+          setAnswers(activeServer.answers);
+          timeSpentRef.current = timeSpent;
+          setTimeRemaining(remaining);
+
+          // Find first unanswered question index
+          const firstUnansweredIdx = activeServer.questions.findIndex(
+            (q) => activeServer.answers[q.id] === undefined
+          );
+          setCurrentIndex(firstUnansweredIdx >= 0 ? firstUnansweredIdx : 0);
+
+          // Sync active state to local recovery storage
+          saveActiveAttempt({
+            attemptId: att.id,
+            topic: att.topic,
+            questions: activeServer.questions,
+            timerLimitSeconds: limit,
+            startedAt: att.startedAt,
+            answers: activeServer.answers,
+            timeSpentSeconds: timeSpent,
+            isOffline: false
+          });
+
+          setScreenMode('ACTIVE_TEST');
+          showToast(`Resumed active assessment for ${att.topic}. Progress restored.`, 'info');
+          return;
+        }
+      } catch (err) {
+        console.warn('[AssessmentPage] Server active attempt check failed:', err);
       }
-      setScreenMode('ACTIVE_TEST');
+
+      // 2. Client offline recovery fallback
+      let sessionAttemptId = '';
+      let sessionTopic = '';
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        sessionAttemptId = sessionStorage.getItem('skillrpl_assessment_attempt_id') || '';
+        sessionTopic = sessionStorage.getItem('skillrpl_assessment_topic') || '';
+      }
+
+      const active = getActiveAttempt();
+      const effectiveAttemptId = sessionAttemptId || active?.attemptId || '';
+
+      if (active && active.questions?.length === 10 && isMounted) {
+        const idToUse = effectiveAttemptId || active.attemptId;
+        setAttemptId(idToUse);
+        setSelectedTopic(sessionTopic || active.topic);
+        setQuestions(active.questions);
+        setAnswers(active.answers || {});
+        const saved = loadAutosavedAnswers(idToUse);
+        if (saved) {
+          setAnswers(saved.answers || {});
+          timeSpentRef.current = saved.timeSpentSeconds || 0;
+          const remaining = Math.max(10, (active.timerLimitSeconds || 600) - (saved.timeSpentSeconds || 0));
+          setTimeRemaining(remaining);
+        }
+        setScreenMode('ACTIVE_TEST');
+      }
     }
-  }, []);
+
+    restoreActiveSession();
+    return () => {
+      isMounted = false;
+    };
+  }, [loadHistory, showToast]);
 
   // Timer countdown hook
   useEffect(() => {
@@ -200,7 +283,7 @@ export const AssessmentPage: React.FC = () => {
     }
   };
 
-  // Answer selection handler
+  // Answer selection handler - immediate persistence to server & local recovery storage
   const handleSelectOption = (optionIndex: number) => {
     if (!questions[currentIndex]) return;
     const currentQId = questions[currentIndex].id;
@@ -211,7 +294,27 @@ export const AssessmentPage: React.FC = () => {
     setAnswers(updated);
     const activeId = attemptId || (typeof window !== 'undefined' ? sessionStorage.getItem('skillrpl_assessment_attempt_id') : '') || '';
     if (activeId) {
+      // 1. Immediate local recovery persistence
       autosaveAnswers(activeId, updated, timeSpentRef.current);
+      // 2. Immediate server database persistence
+      saveSingleAnswer(activeId, currentQId, optionIndex, timeSpentRef.current);
+    }
+  };
+
+  // View full detailed attempt review from history
+  const handleViewPastAttempt = async (pastId: string) => {
+    setLoading(true);
+    try {
+      const detail = await getMCQAttempt(pastId);
+      if (detail && detail.attempt) {
+        setAttemptResult(detail.attempt);
+        setQuestionReview(detail.questions || []);
+        setScreenMode('COMPLETED_RESULT');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to load past attempt details.', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -523,6 +626,165 @@ export const AssessmentPage: React.FC = () => {
             )}
           </GlassButton>
         </GlassCard>
+
+        {/* My Assessment History Section (Database Persisted) */}
+        <div style={{ marginTop: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+            <div>
+              <h2 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--color-primary-navy)', margin: 0 }}>
+                My Assessment History
+              </h2>
+              <p style={{ fontSize: '12.5px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                All completed 10-MCQ competency tests stored in database records
+              </p>
+            </div>
+            <GlassButton variant="secondary" size="sm" onClick={loadHistory} disabled={loadingHistory}>
+              <RotateCcw size={14} className={loadingHistory ? 'animate-spin' : ''} />
+              <span>Refresh History</span>
+            </GlassButton>
+          </div>
+
+          {pastAttempts.length === 0 ? (
+            <GlassCard variant="elevated" style={{ padding: '32px', textAlign: 'center' }}>
+              <div
+                style={{
+                  width: '48px',
+                  height: '48px',
+                  borderRadius: '12px',
+                  background: 'rgba(18, 59, 93, 0.08)',
+                  color: 'var(--color-primary-navy)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: '12px'
+                }}
+              >
+                <BookOpen size={24} />
+              </div>
+              <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--color-primary-navy)' }}>
+                No completed assessments yet
+              </h3>
+              <p style={{ fontSize: '13px', color: 'var(--color-text-muted)', marginTop: '4px', maxWidth: '480px', margin: '4px auto 0' }}>
+                Select your trade above and start your first 10-question RPL knowledge screening test.
+              </p>
+            </GlassCard>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px' }}>
+              {pastAttempts.map((att) => {
+                const isStrong = att.systemIndicator === 'Strong Performance';
+                const isNeedsImp = att.systemIndicator === 'Needs Improvement';
+                const submittedDateStr = att.submittedAt
+                  ? new Date(att.submittedAt).toLocaleDateString('en-IN', {
+                      day: 'numeric',
+                      month: 'short',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })
+                  : new Date(att.startedAt).toLocaleDateString();
+
+                return (
+                  <GlassCard
+                    key={att.id}
+                    variant="elevated"
+                    style={{
+                      padding: '20px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      gap: '14px',
+                      borderLeft: '4px solid var(--color-accent-teal)'
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: 800,
+                            textTransform: 'uppercase',
+                            color: 'var(--color-accent-teal)'
+                          }}
+                        >
+                          {att.topic}
+                        </span>
+                        <GlassBadge variant={att.status === 'COMPLETED' ? 'teal' : 'sky'}>
+                          {att.status.replace(/_/g, ' ')}
+                        </GlassBadge>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', marginTop: '10px' }}>
+                        <span style={{ fontSize: '26px', fontWeight: 900, color: 'var(--color-primary-navy)' }}>
+                          {att.score}/10
+                        </span>
+                        <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--color-accent-teal)' }}>
+                          ({att.percentage}%)
+                        </span>
+                      </div>
+
+                      <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: 700,
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            background: isStrong
+                              ? 'rgba(13, 148, 136, 0.15)'
+                              : isNeedsImp
+                              ? 'rgba(234, 179, 8, 0.15)'
+                              : 'rgba(239, 68, 68, 0.15)',
+                            color: isStrong ? '#0D9488' : isNeedsImp ? '#B45309' : '#DC2626'
+                          }}
+                        >
+                          {att.systemIndicator}
+                        </span>
+
+                        {att.assessorDecision && (
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              padding: '3px 8px',
+                              borderRadius: '6px',
+                              background: 'rgba(18, 59, 93, 0.12)',
+                              color: 'var(--color-primary-navy)'
+                            }}
+                          >
+                            Assessor: {att.assessorDecision.replace(/_/g, ' ')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        paddingTop: '12px',
+                        borderTop: '1px solid rgba(18, 59, 93, 0.08)',
+                        fontSize: '12px',
+                        color: 'var(--color-text-muted)'
+                      }}
+                    >
+                      <div>
+                        <span>{submittedDateStr}</span> • <span>{formatTimer(att.timeSpentSeconds || 0)}</span>
+                      </div>
+                      <GlassButton
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => handleViewPastAttempt(att.id)}
+                      >
+                        View Review <ChevronRight size={14} />
+                      </GlassButton>
+                    </div>
+                  </GlassCard>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     );
   }

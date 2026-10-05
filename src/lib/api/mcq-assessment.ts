@@ -45,6 +45,7 @@ export interface AssessmentAttemptResponse {
   categoryScores: Record<string, { correct: number; total: number }>;
   aiSummary: string;
   timeSpentSeconds: number;
+  timerLimitSeconds?: number;
   startedAt: string;
   submittedAt?: string;
   assessorDecision?: string;
@@ -123,6 +124,66 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 
   return headers;
 }
+
+/**
+ * Immediately persists a single answered option and cumulative time spent to the backend database.
+ */
+export async function saveSingleAnswer(
+  attemptId: string,
+  questionId: string,
+  selectedAnswer: number,
+  timeSpentSeconds: number = 0
+): Promise<boolean> {
+  if (!attemptId || !questionId || selectedAnswer === undefined) return false;
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch('/api/assessment/answer', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        attemptId: attemptId.trim(),
+        questionId: questionId.trim(),
+        selectedAnswer,
+        timeSpentSeconds
+      })
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn('[MCQ API] Server single answer autosave failed:', err);
+    return false;
+  }
+}
+
+/**
+ * Fetches the currently active IN_PROGRESS assessment attempt from the database.
+ */
+export async function getActiveAttemptServer(): Promise<{
+  attempt: AssessmentAttemptResponse;
+  questions: MCQQuestionClient[];
+  answers: Record<string, number>;
+  answeredCount: number;
+} | null> {
+  if (!isOnline()) return null;
+  try {
+    const headers = await getAuthHeaders();
+    const res = await fetch('/api/assessment/attempt?active=true', { headers });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.success && data.attempt && data.questions) {
+      return {
+        attempt: data.attempt,
+        questions: data.questions,
+        answers: data.answers || {},
+        answeredCount: data.answeredCount || 0
+      };
+    }
+    return null;
+  } catch (err) {
+    console.warn('[MCQ API] Failed to fetch active attempt from server:', err);
+    return null;
+  }
+}
+
 
 /**
  * Starts a new 10-MCQ assessment for a selected topic.
