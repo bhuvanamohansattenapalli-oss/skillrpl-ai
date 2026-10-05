@@ -11,12 +11,12 @@
 import {
   type WorkerMappingInput,
   type QualificationMappingResponse
-} from '../mapping/qualification-engine.ts';
+} from '../mapping/qualification-engine';
 import {
   runOfflineQualificationMapping,
   saveLocalMappingDraft,
   getLocalMappingDraft
-} from '../offline/qualification-storage.ts';
+} from '../offline/qualification-storage';
 
 export async function requestQualificationMapping(
   applicationId: string,

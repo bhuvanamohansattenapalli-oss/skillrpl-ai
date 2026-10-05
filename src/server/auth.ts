@@ -1,5 +1,5 @@
-import { prisma } from '../lib/db.ts';
-import { getSupabaseClient, getServerSupabaseClient } from '../lib/supabase.ts';
+import { prisma } from '../lib/db';
+import { getSupabaseClient, getServerSupabaseClient } from '../lib/supabase';
 
 export interface SyncProfileData {
   userId?: string;

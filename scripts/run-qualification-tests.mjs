@@ -1,7 +1,7 @@
 /**
  * Standalone Execution Script for NSQF Qualification Mapping Test Suite
  */
-import { runAllQualificationMappingTests } from '../src/lib/mapping/qualification-engine.test.ts';
+import { runAllQualificationMappingTests } from '../src/lib/mapping/qualification-engine.test';
 
 async function main() {
   console.log('=================================================================');

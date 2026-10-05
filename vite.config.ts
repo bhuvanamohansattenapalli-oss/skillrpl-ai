@@ -1,6 +1,6 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv } from 'vite';
-import { handleApiRoute } from './src/server/api.ts';
+import { handleApiRoute } from './src/server/api';
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {

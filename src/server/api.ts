@@ -1,8 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { generateRplChatResponse } from '../lib/ai/rpl-assistant.ts';
-import { isGeminiConfigured, getGeminiModel } from '../lib/ai/gemini.ts';
-import { chatRequestSchema, skillAnalysisRequestSchema, type ChatApiResponse } from '../lib/ai/types.ts';
-import { isDatabaseConfigured } from '../lib/db.ts';
+import { generateRplChatResponse } from '../lib/ai/rpl-assistant';
+import { isGeminiConfigured, getGeminiModel } from '../lib/ai/gemini';
+import { chatRequestSchema, skillAnalysisRequestSchema, type ChatApiResponse } from '../lib/ai/types';
+import { isDatabaseConfigured } from '../lib/db';
 
 
 /**
@@ -159,7 +159,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
 
     try {
-      const { runAllQualificationMappingTests } = await import('../lib/mapping/qualification-engine.test.ts');
+      const { runAllQualificationMappingTests } = await import('../lib/mapping/qualification-engine.test');
       const testReport = await runAllQualificationMappingTests();
       sendJsonResponse(res, 200, {
         success: testReport.allPassed,
@@ -210,7 +210,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
 
     try {
-      const { getGeminiClient } = await import('../lib/ai/gemini.ts');
+      const { getGeminiClient } = await import('../lib/ai/gemini');
       const ai = getGeminiClient();
 
       const response = await ai.models.generateContent({
@@ -398,7 +398,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       }
 
       // Dynamically import performSkillAnalysis to isolate AI chat/test from Prisma
-      const { performSkillAnalysis } = await import('../lib/ai/skill-analysis.ts');
+      const { performSkillAnalysis } = await import('../lib/ai/skill-analysis');
       const analysisResult = await performSkillAnalysis(parseResult.data);
 
       sendJsonResponse(res, 200, {
@@ -448,8 +448,8 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
 
     try {
-      const { prisma } = await import('../lib/db.ts');
-      const { ensureAssessorDemoData } = await import('../lib/assessor/seed-assessor-data.ts');
+      const { prisma } = await import('../lib/db');
+      const { ensureAssessorDemoData } = await import('../lib/assessor/seed-assessor-data');
 
       await ensureAssessorDemoData();
 
@@ -526,7 +526,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
 
       // Update or create each AssessmentScore in Supabase
       for (const item of scores) {
@@ -675,7 +675,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       // If token provided, verify with Supabase Auth
       if (token) {
         try {
-          const { verifySupabaseToken } = await import('./auth.ts');
+          const { verifySupabaseToken } = await import('./auth');
           const authUser = await verifySupabaseToken(token);
           verifiedUserId = authUser.id;
         } catch (tokenErr) {
@@ -683,7 +683,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         }
       }
 
-      const { syncUserProfile } = await import('./auth.ts');
+      const { syncUserProfile } = await import('./auth');
       const synced = await syncUserProfile({
         userId: verifiedUserId,
         email: email.trim().toLowerCase(),
@@ -719,12 +719,12 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       const authHeader = req.headers['authorization'];
       const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
 
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
       let user = null;
 
       if (token) {
         try {
-          const { verifySupabaseToken } = await import('./auth.ts');
+          const { verifySupabaseToken } = await import('./auth');
           const authUser = await verifySupabaseToken(token);
           if (authUser?.email) {
             user = await prisma.user.findFirst({
@@ -785,11 +785,11 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
 
       if (token) {
         try {
-          const { verifySupabaseToken } = await import('./auth.ts');
+          const { verifySupabaseToken } = await import('./auth');
           const authUser = await verifySupabaseToken(token);
           if (authUser?.email) {
             const dbUser = await prisma.user.findFirst({
@@ -839,7 +839,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
   async function resolveAuthenticatedWorker(request: IncomingMessage) {
     const authHeader = request.headers['authorization'];
     const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
-    const { prisma } = await import('../lib/db.ts');
+    const { prisma } = await import('../lib/db');
 
     if (!token) {
       if (request.headers['x-require-auth']) {
@@ -874,7 +874,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
     }
 
     try {
-      const { verifySupabaseToken } = await import('./auth.ts');
+      const { verifySupabaseToken } = await import('./auth');
       const authUser = await verifySupabaseToken(token);
       if (!authUser || !authUser.email) {
         const err: any = new Error('Invalid authentication session.');
@@ -888,7 +888,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       });
 
       if (!user) {
-        const { syncUserProfile } = await import('./auth.ts');
+        const { syncUserProfile } = await import('./auth');
         await syncUserProfile({
           userId: authUser.id,
           email: authUser.email.toLowerCase(),
@@ -931,7 +931,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
 
     try {
       const { workerProfile } = await resolveAuthenticatedWorker(req);
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
 
       const applications = await prisma.rPLApplication.findMany({
         where: { workerProfileId: workerProfile.id },
@@ -989,7 +989,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       }
 
       const { workerProfile } = await resolveAuthenticatedWorker(req);
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
 
       const application = await prisma.rPLApplication.findFirst({
         where: {
@@ -1032,7 +1032,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         skills = []
       } = body;
 
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
 
       let applicationRecord;
 
@@ -1153,7 +1153,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
 
       const existing = await prisma.rPLApplication.findFirst({
         where: { id, workerProfileId: workerProfile.id }
@@ -1227,7 +1227,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
 
       const existingApp = await prisma.rPLApplication.findFirst({
         where: { id: applicationId, workerProfileId: workerProfile.id }
@@ -1239,7 +1239,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       }
 
       // Perform AI Analysis using existing Gemini 3.6 Flash integration
-      const { performSkillAnalysis } = await import('../lib/ai/skill-analysis.ts');
+      const { performSkillAnalysis } = await import('../lib/ai/skill-analysis');
 
       const analysisResult = await performSkillAnalysis({
         occupation,
@@ -1304,12 +1304,12 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
   // 11.1 List Verified Qualifications Catalog: GET /api/qualifications
   if (pathname === '/api/qualifications' && req.method === 'GET') {
     try {
-      const { VERIFIED_QUALIFICATIONS } = await import('../data/qualification-catalog.ts');
+      const { VERIFIED_QUALIFICATIONS } = await import('../data/qualification-catalog');
       
       // Optionally sync to database in the background if db is configured
       if (isDatabaseConfigured()) {
         try {
-          const { syncVerifiedQualificationsToDatabase } = await import('./seed-qualifications.ts');
+          const { syncVerifiedQualificationsToDatabase } = await import('./seed-qualifications');
           syncVerifiedQualificationsToDatabase().catch((e) => console.warn('[Background QP Sync Warning]', e));
         } catch {}
       }
@@ -1358,7 +1358,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         // Fallback for offline or local preview
       }
 
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
 
       if (authenticatedWorker) {
         const app = await prisma.rPLApplication.findFirst({
@@ -1375,7 +1375,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       }
 
       // Run Hybrid Mapping Engine (Deterministic + Gemini 3.6 Flash)
-      const { performHybridQualificationMapping } = await import('../lib/mapping/qualification-engine.ts');
+      const { performHybridQualificationMapping } = await import('../lib/mapping/qualification-engine');
 
       const mappingResponse = await performHybridQualificationMapping({
         occupation,
@@ -1392,7 +1392,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       if (isDatabaseConfigured() && mappingResponse.success && mappingResponse.candidates.length > 0) {
         try {
           // Ensure QPs exist in database
-          const { syncVerifiedQualificationsToDatabase } = await import('./seed-qualifications.ts');
+          const { syncVerifiedQualificationsToDatabase } = await import('./seed-qualifications');
           await syncVerifiedQualificationsToDatabase();
 
           // Upsert or clear previous mappings for this application
@@ -1483,7 +1483,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
 
       const mappings = await prisma.qualificationMapping.findMany({
         where: { rplApplicationId: applicationId },
@@ -1530,7 +1530,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
 
       // Verify application exists
       const application = await prisma.rPLApplication.findUnique({
@@ -1633,10 +1633,10 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       throw err;
     }
 
-    const { prisma } = await import('../lib/db.ts');
+    const { prisma } = await import('../lib/db');
 
     if (token) {
-      const { verifySupabaseToken } = await import('./auth.ts');
+      const { verifySupabaseToken } = await import('./auth');
       const authUser = await verifySupabaseToken(token);
       if (authUser?.email) {
         let user = await prisma.user.findFirst({
@@ -1717,8 +1717,8 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const { prisma } = await import('../lib/db.ts');
-      const { generateAssessmentPlan } = await import('../lib/assessment/task-generator.ts');
+      const { prisma } = await import('../lib/db');
+      const { generateAssessmentPlan } = await import('../lib/assessment/task-generator');
 
       const application = await prisma.rPLApplication.findUnique({
         where: { id: applicationId },
@@ -1823,9 +1823,9 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const { prisma } = await import('../lib/db.ts');
-      const { calculateAssessmentMetrics } = await import('../lib/assessment/scoring-rubric.ts');
-      const { generateAssessmentPlan } = await import('../lib/assessment/task-generator.ts');
+      const { prisma } = await import('../lib/db');
+      const { calculateAssessmentMetrics } = await import('../lib/assessment/scoring-rubric');
+      const { generateAssessmentPlan } = await import('../lib/assessment/task-generator');
 
       let assessment = await prisma.assessment.findFirst({
         where: assessmentId ? { id: assessmentId } : { rplApplicationId: applicationId! },
@@ -1951,7 +1951,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       }
 
       const { validateCriterionScore, getRubricLevelInfo, calculateAssessmentMetrics } = await import(
-        '../lib/assessment/scoring-rubric.ts'
+        '../lib/assessment/scoring-rubric'
       );
 
       // Validate score according to standardized 0-4 rubric
@@ -1965,7 +1965,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       }
 
       const rubricInfo = getRubricLevelInfo(Number(scoreAwarded));
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
 
       const assessment = await prisma.assessment.findUnique({
         where: { id: assessmentId },
@@ -2096,8 +2096,8 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const { performAIAssessmentAssistance } = await import('../lib/assessment/ai-assessor-copilot.ts');
-      const { prisma } = await import('../lib/db.ts');
+      const { performAIAssessmentAssistance } = await import('../lib/assessment/ai-assessor-copilot');
+      const { prisma } = await import('../lib/db');
 
       const aiResult = await performAIAssessmentAssistance({
         workerName,
@@ -2171,7 +2171,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
 
       const assessment = await prisma.assessment.findUnique({
         where: { id: assessmentId },
@@ -2272,11 +2272,11 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
   // 12.6 Assessor Analytics & Inter-Assessor Consistency: GET /api/assessor/analytics
   if (pathname === '/api/assessor/analytics' && req.method === 'GET') {
     try {
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
       const {
         analyzeInterAssessorConsistency,
         BENCHMARK_EVALUATION_DATASET
-      } = await import('../lib/assessment/inter-assessor-consistency.ts');
+      } = await import('../lib/assessment/inter-assessor-consistency');
 
       const allAssessments = await prisma.assessment.findMany({
         include: {
@@ -2342,7 +2342,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
 
       const assessment = await prisma.assessment.findFirst({
         where: { rplApplicationId: applicationId },
@@ -2424,8 +2424,8 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       };
 
       const topic = body.topic?.trim() || 'Electrician';
-      const { prisma } = await import('../lib/db.ts');
-      const { generate10MCQQuestions } = await import('../lib/assessment/ai-mcq-generator.ts');
+      const { prisma } = await import('../lib/db');
+      const { generate10MCQQuestions } = await import('../lib/assessment/ai-mcq-generator');
 
       // Resolve worker profile
       let workerProfileId = body.workerProfileId;
@@ -2540,8 +2540,8 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const { prisma } = await import('../lib/db.ts');
-      const { generateAIPerformanceSummary } = await import('../lib/assessment/ai-mcq-generator.ts');
+      const { prisma } = await import('../lib/db');
+      const { generateAIPerformanceSummary } = await import('../lib/assessment/ai-mcq-generator');
 
       // 1. Authenticate worker if authorization token is provided
       let authenticatedWorker: any = null;
@@ -2570,7 +2570,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
       // 3. Fallback: If attempt was initiated offline or unpersisted, reconstruct into database
       if (!attempt && (body.attemptId.startsWith('offline_') || body.isOfflineSync || body.topic)) {
         const fallbackTopic = body.topic || 'Electrician';
-        const { selectQuestionsFromBank } = await import('../lib/assessment/mcq-question-bank.ts');
+        const { selectQuestionsFromBank } = await import('../lib/assessment/mcq-question-bank');
         const bankQuestions = selectQuestionsFromBank(fallbackTopic, 10, Date.now());
 
         let targetWorkerId = authenticatedWorker?.id;
@@ -2865,7 +2865,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
       const attempt = await prisma.assessmentAttempt.findUnique({
         where: { id: attemptId },
         include: {
@@ -2943,7 +2943,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
   // 13.4 List Worker Attempts: GET /api/assessment/worker-attempts
   if (pathname === '/api/assessment/worker-attempts' && req.method === 'GET') {
     try {
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
       let workerProfileId = parsedUrl.searchParams.get('workerProfileId');
 
       if (!workerProfileId) {
@@ -3003,7 +3003,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
         return true;
       }
 
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
 
       const updated = await prisma.assessmentAttempt.update({
         where: { id: body.attemptId },
@@ -3031,7 +3031,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
   // 13.6 Assessor List of MCQ Assessments: GET /api/assessor/mcq-assessments
   if (pathname === '/api/assessor/mcq-assessments' && req.method === 'GET') {
     try {
-      const { prisma } = await import('../lib/db.ts');
+      const { prisma } = await import('../lib/db');
       const attempts = await prisma.assessmentAttempt.findMany({
         include: {
           workerProfile: {
@@ -3061,7 +3061,7 @@ export async function handleApiRoute(req: IncomingMessage, res: ServerResponse):
   if (pathname === '/api/assessment/offline-pack' && req.method === 'GET') {
     try {
       const topic = parsedUrl.searchParams.get('topic') || 'Electrician';
-      const { selectQuestionsFromBank } = await import('../lib/assessment/mcq-question-bank.ts');
+      const { selectQuestionsFromBank } = await import('../lib/assessment/mcq-question-bank');
       const questions = selectQuestionsFromBank(topic, 10, Date.now());
 
       // Strip correct answer for offline caching

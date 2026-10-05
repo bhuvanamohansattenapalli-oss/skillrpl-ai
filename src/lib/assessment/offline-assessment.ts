@@ -10,8 +10,8 @@
  * - Gemini AI requests are never attempted while offline.
  */
 
-import { type GeneratedAssessmentPlan } from './task-generator.ts';
-import { type AssessmentMetrics, calculateAssessmentMetrics } from './scoring-rubric.ts';
+import { type GeneratedAssessmentPlan } from './task-generator';
+import { type AssessmentMetrics, calculateAssessmentMetrics } from './scoring-rubric';
 
 export interface LocalScoreEntry {
   criterionId: string;

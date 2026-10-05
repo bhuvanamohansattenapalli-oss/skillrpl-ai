@@ -2,8 +2,8 @@
  * Seed / Synchronize Authoritative NCVET / NQR Qualifications into Prisma PostgreSQL
  * Ensures database always matches verified qualification packs and NOS units.
  */
-import { prisma } from '../lib/db.ts';
-import { VERIFIED_QUALIFICATIONS } from '../data/qualification-catalog.ts';
+import { prisma } from '../lib/db';
+import { VERIFIED_QUALIFICATIONS } from '../data/qualification-catalog';
 
 export async function syncVerifiedQualificationsToDatabase() {
   try {

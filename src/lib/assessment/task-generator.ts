@@ -13,7 +13,7 @@ import {
   groupTasksByCompetency,
   type PracticalTaskDefinition,
   type ObservableCriterion
-} from './task-bank.ts';
+} from './task-bank';
 
 export interface GeneratedAssessmentCriterion extends ObservableCriterion {
   id: string; // unique ID: e.g. "TASK-CON-Q0603-N0607-A__tools_ppe"

@@ -1,4 +1,4 @@
-import { prisma } from '../db.ts';
+import { prisma } from '../db';
 
 /**
  * Initializes essential demo data in Supabase if not already present,

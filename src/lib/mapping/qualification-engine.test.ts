@@ -17,11 +17,11 @@ import {
   performDeterministicMatch,
   performHybridQualificationMapping,
   type WorkerMappingInput
-} from './qualification-engine.ts';
+} from './qualification-engine';
 import {
   VERIFIED_QUALIFICATIONS,
   getQualificationByCode
-} from '../../data/qualification-catalog.ts';
+} from '../../data/qualification-catalog';
 
 interface TestResult {
   testNumber: number;
