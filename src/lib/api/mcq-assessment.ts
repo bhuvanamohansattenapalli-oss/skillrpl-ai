@@ -9,6 +9,7 @@ import {
   isOnline,
   createOfflineAttemptLocally,
   saveActiveAttempt,
+  getActiveAttempt,
   clearActiveAttempt,
   queueOfflineSubmission,
   getPendingSubmissions,
@@ -73,6 +74,11 @@ export interface StartAssessmentResult {
 export interface SubmitAssessmentResult {
   success: boolean;
   message?: string;
+  attemptId?: string;
+  score?: number;
+  totalQuestions?: number;
+  percentage?: number;
+  alreadySubmitted?: boolean;
   attempt: AssessmentAttemptResponse;
   questionReview: MCQQuestionReview[];
   isOfflineQueued?: boolean;
@@ -186,13 +192,16 @@ export async function startMCQAssessment(
 export async function submitMCQAssessment(
   attemptId: string,
   answers: Record<string, number>,
-  timeSpentSeconds: number = 0
+  timeSpentSeconds: number = 0,
+  topic?: string
 ): Promise<SubmitAssessmentResult> {
+  const activeTopic = topic || getActiveAttempt()?.topic || 'Electrician';
+
   if (!isOnline()) {
     // Queue offline submission
     queueOfflineSubmission({
       attemptId,
-      topic: 'Offline Assessment',
+      topic: activeTopic,
       answers,
       timeSpentSeconds,
       completedAt: new Date().toISOString(),
@@ -205,9 +214,13 @@ export async function submitMCQAssessment(
       success: true,
       message: 'Assessment completed offline. Answers saved locally and will sync when internet reconnects.',
       isOfflineQueued: true,
+      attemptId,
+      score: 0,
+      totalQuestions: 10,
+      percentage: 0,
       attempt: {
         id: attemptId,
-        topic: 'Offline Assessment',
+        topic: activeTopic,
         status: 'COMPLETED_OFFLINE',
         score: 0,
         totalQuestions: 10,
@@ -232,13 +245,29 @@ export async function submitMCQAssessment(
     body: JSON.stringify({
       attemptId,
       answers,
-      timeSpentSeconds
+      timeSpentSeconds,
+      topic: activeTopic
     })
   });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP error ${res.status}`);
+    if (res.status === 400) {
+      throw new Error(err.error || 'Invalid submission. Please check your answers.');
+    }
+    if (res.status === 401) {
+      throw new Error(err.error || 'Please sign in to submit your assessment.');
+    }
+    if (res.status === 403) {
+      throw new Error(err.error || 'You are not authorized to submit this assessment.');
+    }
+    if (res.status === 404) {
+      throw new Error(err.error || 'Assessment attempt not found.');
+    }
+    if (res.status === 409) {
+      throw new Error(err.error || 'This assessment attempt was already submitted.');
+    }
+    throw new Error(err.error || `Server error (${res.status}) while submitting assessment.`);
   }
 
   const data = await res.json();

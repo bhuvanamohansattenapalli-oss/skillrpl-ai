@@ -205,7 +205,7 @@ export const AssessmentPage: React.FC = () => {
 
     setSubmitting(true);
     try {
-      const res = await submitMCQAssessment(attemptId, answers, timeSpentRef.current);
+      const res = await submitMCQAssessment(attemptId, answers, timeSpentRef.current, selectedTopic);
       if (res.success) {
         setAttemptResult(res.attempt);
         setQuestionReview(res.questionReview || []);
@@ -227,7 +227,7 @@ export const AssessmentPage: React.FC = () => {
     showToast('Time is up! Automatically submitting your answers...', 'warning');
     setSubmitting(true);
     try {
-      const res = await submitMCQAssessment(attemptId, answers, timeSpentRef.current);
+      const res = await submitMCQAssessment(attemptId, answers, timeSpentRef.current, selectedTopic);
       if (res.success) {
         setAttemptResult(res.attempt);
         setQuestionReview(res.questionReview || []);
@@ -239,7 +239,7 @@ export const AssessmentPage: React.FC = () => {
     } finally {
       setSubmitting(false);
     }
-  }, [attemptId, answers, showToast]);
+  }, [attemptId, answers, selectedTopic, showToast]);
 
   const currentQuestion = questions[currentIndex];
   const answeredTotal = Object.keys(answers).length;
